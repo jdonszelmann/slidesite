@@ -1,0 +1,114 @@
+
+body, html {
+    padding: 0;
+    margin: 0;
+    height: 100%;
+    width: 100%;
+}
+
+body {
+    overflow-y: hidden;
+}
+
+#homepage {
+    color: #9b7c01;
+    background: #06181b;
+
+    height: 100%;
+    width: 100%;
+
+    display: grid;
+    grid-template-columns: minmax(20%, 20em) auto;
+    grid-template-rows: auto;
+}
+
+#sidebar {
+    border-right: 1px solid #9b7c01;
+    overflow-y: scroll;
+}
+
+.sidebaritem {
+    padding-top: 0.5em;
+    padding-bottom: 0.5em;
+    padding-left: 0.5em;
+    cursor: pointer;
+}
+
+.sidebaritem .index {
+    font-family: monospace;
+    font-size: larger;
+    white-space: pre;
+}
+
+.sidebaritem:hover {
+    background: #0f3b42;
+    transition: background-color 1s ease;
+}
+
+.sidebaritem.active {
+    background: #0f3b42;
+    transition: background-color 1s ease;
+}
+
+#main-homepage {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+
+    gap: 10em;
+
+    padding: 5em;
+}
+
+#homepage h1 {
+    margin-top: 20%;
+}
+
+#hp-buttons {
+    display: flex;
+    flex-direction: row;
+    font-size: larger;
+    gap: 2em;
+
+    margin-bottom: auto;
+}
+
+#hp-buttons button {
+    padding: 1em;
+
+    color: #9b7c01;
+    background: #06181b;
+    border: 2px solid #9b7c01;
+    border-radius: 2px;
+    cursor: pointer;
+
+    width: 20em;
+}
+
+#hp-buttons button:hover {
+    background: #0f3b42;
+    transition: background-color 1s ease;
+}
+
+#slides {
+    display: none;
+    overflow-y: scroll;
+    scroll-snap-type: y mandatory;
+    background-color: white;
+
+}
+
+.slide {
+    aspect-ratio: 16 / 9;
+    scroll-snap-align: start;
+    scroll-padding: 10%;
+}
+
+.slide + .slide {
+    border: 1px solid black;
+}
+
+.slide * {
+    all: unset;
+}
