@@ -7,3 +7,6 @@ Slides can be generated as:
 * HTML website which in the future may even become interactively scriptable through the same scripting language. This makes the slides a useful interactive learning tool
 * PDF (not yet supported)
 
+# LICENSE
+
+This project is licensed under the MIT license
