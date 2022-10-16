@@ -1,18 +1,18 @@
+use crate::converter::{convert, ConversionError};
+use crate::emitter::{emit, EmitError};
+use crate::eval::{eval_ast, EvalError};
+use crate::parser::{format_errors, parse};
+use crate::typechecker::{typecheck, TypeError};
+use chumsky::error::Simple;
 use std::error::Error;
 use std::fs;
-use chumsky::error::Simple;
-use crate::parser::{parse, format_errors};
 use thiserror::Error;
-use crate::converter::{ConversionError, convert};
-use crate::emitter::{emit, EmitError};
-use crate::typechecker::{typecheck, TypeError};
-use crate::eval::{eval_ast, EvalError};
 
-mod parser;
 mod converter;
-mod typechecker;
 mod emitter;
 mod eval;
+mod parser;
+mod typechecker;
 
 #[derive(Debug, Error)]
 pub enum CompileError {
@@ -33,8 +33,7 @@ pub enum CompileError {
 }
 
 fn compile(source: &str) -> Result<String, CompileError> {
-    let ast = parse(source)
-        .map_err(|e| CompileError::ParseError(source.to_string(), e))?;
+    let ast = parse(source).map_err(|e| CompileError::ParseError(source.to_string(), e))?;
 
     let ast = convert(ast)?;
 

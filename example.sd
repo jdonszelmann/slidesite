@@ -18,6 +18,10 @@ let example = Theme {
     background = (255, 0, 0),
 };
 
+fn test_function() {
+
+}
+
 let name = "TEST NAME";
 
 title "{name}"

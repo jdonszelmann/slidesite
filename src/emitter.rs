@@ -1,11 +1,9 @@
-use maud::{html, DOCTYPE, Render, PreEscaped};
-use crate::eval::value::{SlideShow, Slide};
+use crate::eval::value::{Slide, SlideShow};
+use maud::{html, PreEscaped, Render, DOCTYPE};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum EmitError {
-
-}
+pub enum EmitError {}
 
 pub fn emit(ast: SlideShow) -> Result<String, EmitError> {
     let title = ast.title.unwrap_or_else(|| {
