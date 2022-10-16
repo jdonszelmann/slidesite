@@ -5,7 +5,7 @@ use thiserror::Error;
 mod ast;
 
 pub use ast::*;
-use crate::parser::{Atom, TopLevel};
+use crate::parser::{FunctionStatement, TopLevel};
 
 #[derive(Debug, Error)]
 pub enum ConversionError {
@@ -32,6 +32,36 @@ fn convert_atom(a: parser::Atom) -> Result<Expression> {
         parser::Atom::Struct(name, assignments) => Expression::StructInstance {
             name,
             assignments: assignments.into_iter().map(|(n, e)| Ok((n, convert_expr(e)?))).collect::<Result<_>>()?,
+        },
+        parser::Atom::Function(f) => {
+            Expression::Function(Function {
+                name: None,
+                signature: convert_signature(f.signature)?,
+                body: convert_function_body(f.body)?,
+            })
+        }
+    })
+}
+
+fn convert_signature(s: parser::FunctionSignature) -> Result<FunctionSignature> {
+    Ok(FunctionSignature {
+        params: s.params,
+        ret: s.ret,
+    })
+}
+
+fn convert_function_body(s: parser::FunctionBody) -> Result<FunctionBody> {
+    Ok(FunctionBody {
+        stmts: s.stmts.into_iter().map(convert_function_stmt).collect::<Result<_>>()?,
+        ret_expr: s.ret_expr.map(convert_expr).transpose()?.map(Box::new),
+    })
+}
+
+fn convert_function_stmt(s: parser::FunctionStatement) -> Result<Statement> {
+    Ok(match s {
+        FunctionStatement::Let(name, expr) => Statement::Let {
+            name,
+            value: convert_expr(expr)?,
         }
     })
 }
@@ -76,22 +106,30 @@ fn convert_toplevels(toplevels: Vec<parser::TopLevel>) -> Result<(Vec<Statement>
                 name: t.name,
                 value: Expression::StructInstance {
                     name: "Theme".to_string(),
-                    assignments: vec![]
-                }
+                    assignments: vec![],
+                },
             },
             TopLevel::Template(t) => Statement::Let {
                 name: t.name,
-                value: Expression::SlideBody(convert_body(t.body)?)
+                value: Expression::SlideBody(convert_body(t.body)?),
             },
             TopLevel::TypeDef(t) => {
                 types.push(convert_typedef(t)?);
                 continue;
-            },
+            }
             TopLevel::Let(name, value) => Statement::Let {
                 name,
-                value: convert_expr(value)?
+                value: convert_expr(value)?,
             },
-            TopLevel::Title(s) => Statement::Title(convert_slidestring(s)?)
+            TopLevel::Title(s) => Statement::Title(convert_slidestring(s)?),
+            TopLevel::Function(f) => Statement::Let {
+                name: f.name.clone(),
+                value: Expression::Function(Function {
+                    name: Some(f.name),
+                    signature: convert_signature(f.signature)?,
+                    body: convert_function_body(f.body)?
+                }),
+            }
         })
     }
 

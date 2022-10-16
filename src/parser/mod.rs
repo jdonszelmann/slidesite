@@ -150,12 +150,15 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
         Atom::Struct(name, assignments)
     }).dy();
 
+    let mut function_expr = Recursive::<_, _, Simple<char>>::declare();
+
     let atom = choice((
         struct_instantiation,
         number.map(Atom::Number),
         identifier.clone().map(Atom::Identifier),
         string.clone().map(|i| Atom::String(Box::new(i))),
         tuple,
+        function_expr.clone().map(|i| Atom::Function(i)),
     )).dy();
 
     let atom_expr = choice((
@@ -289,6 +292,74 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
             .dy()
     });
 
+    let function_stmt = choice((
+        let_assignment.clone().map(|(name, expr) | FunctionStatement::Let(name, expr)),
+    ))
+        .padded_by(comment.clone().repeated())
+        .then_ignore(filter(|i: &char| char::is_whitespace(*i) && *i != '\n').repeated().or_not());
+
+    let function_stmt_seq = function_stmt
+        .separated_by(statement_terminator.clone())
+        .then(expression.clone().or_not())
+        .dy();
+
+    let function_body = function_stmt_seq
+        .clone()
+        .padded()
+        .padded_by(comment.clone().repeated())
+        .delimited_by(
+            just('{'), just('}'),
+        )
+        .padded()
+        .map(|(stmts, ret_expr)| FunctionBody {
+            stmts,
+            ret_expr,
+        })
+        .dy();
+
+    let param = identifier.clone().padded().then_ignore(op(':')).padded().then(identifier.clone()).padded().dy();
+    let paramlist = param
+        .separated_by(op(',').padded())
+        .delimited_by(just('('), just(')'));
+    let return_type = just("->")
+        .padded()
+        .ignore_then(identifier.clone());
+
+    let signature = paramlist
+        .padded()
+        .then(return_type.or_not().padded())
+        .map(|(params, ret)| FunctionSignature {
+            params,
+            ret
+        })
+        .dy();
+
+    let function_common_part = signature
+        .then(function_body)
+        .dy();
+
+    function_expr.define(
+        text::keyword("fn")
+            .padded()
+            .ignore_then(function_common_part.clone())
+            .map(|(signature, body)| Box::new(UnnamedFunction {
+                body,
+                signature,
+            }))
+    );
+
+    let function_stmt = text::keyword("fn")
+        .padded()
+        .ignore_then(identifier.clone())
+        .padded()
+        .then(function_common_part)
+        .map(|(name, (signature, body))| NamedFunction {
+            name,
+            body,
+            signature
+        })
+        .dy();
+
     let slidebody = stmtseq
         .clone()
         .padded()
@@ -415,9 +486,11 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
         template.map(TopLevel::Template),
         typedef.map(TopLevel::TypeDef),
         let_assignment
+            .clone()
             .then_ignore(statement_terminator)
             .map(|(name, expr)| TopLevel::Let(name, expr)),
         title.map(TopLevel::Title),
+        function_stmt.map(TopLevel::Function),
     ))
         .padded_by(comment.clone().repeated())
         .padded()

@@ -1,9 +1,10 @@
 use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 use convert_case::{Case, Casing};
-use crate::converter::{Expression, Program, SlideString, Statement, StringCharacter};
+use crate::converter::{Expression, Function, Program, SlideString, Statement, StringCharacter};
 use crate::eval::value::{SlideShow, SlideStmt, Value, Slide};
 use thiserror::Error;
 use crate::converter;
@@ -38,9 +39,22 @@ pub fn eval_ast(ast: Program) -> Result<SlideShow> {
     })
 }
 
-#[derive(Debug)]
-struct Scope {
+pub struct Scope {
     bindings: HashMap<String, Rc<RefCell<Option<Value>>>>
+}
+
+impl Debug for Scope {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<scope object>")
+    }
+}
+
+impl Clone for Scope {
+    fn clone(&self) -> Self {
+        Scope {
+            bindings: self.bindings.clone()
+        }
+    }
 }
 
 pub struct UndefinedVariable(Rc<RefCell<Option<Value>>>);
@@ -119,6 +133,9 @@ impl Evaluator {
                 )
             },
             Expression::SlideBody(_) => todo!(),
+            Expression::Function(f@Function{..}) => {
+                Value::Function(f, scope.clone())
+            }
         })
     }
 

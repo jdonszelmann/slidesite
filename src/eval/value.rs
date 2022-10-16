@@ -1,13 +1,16 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use itertools::Itertools;
+use crate::converter::Function;
+use crate::eval::Scope;
 
 #[derive(Debug, Clone)]
 pub enum Value {
     Number(i64),
     String(String),
     Tuple(Vec<Value>),
-    Struct(HashMap<String, Value>)
+    Struct(HashMap<String, Value>),
+    Function(Function, Scope),
 }
 
 impl Display for Value {
@@ -22,6 +25,8 @@ impl Display for Value {
                 write!(f, "({},)", i[0])
             }
             Value::Struct(_) => todo!(),
+            Value::Function(Function{name: Some(name), ..}, _) => write!(f, "<function {name}>"),
+            Value::Function(_, _) => write!(f, "<unnamed function>")
         }
     }
 }

@@ -1,5 +1,24 @@
 
 #[derive(Debug, Clone)]
+pub struct FunctionBody {
+    pub stmts: Vec<Statement>,
+    pub ret_expr: Option<Box<Expression>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionSignature {
+    pub params: Vec<(String, String)>,
+    pub ret: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub name: Option<String>,
+    pub signature: FunctionSignature,
+    pub body: FunctionBody,
+}
+
+#[derive(Debug, Clone)]
 pub enum Expression {
     Identifier(String),
     Number(i64),
@@ -10,6 +29,7 @@ pub enum Expression {
         name: String,
         assignments: Vec<(String, Expression)>
     },
+    Function(Function),
 
     Sub(Box<Expression>, Box<Expression>),
     Mul(Box<Expression>, Box<Expression>),
@@ -54,7 +74,7 @@ pub struct Template {
     pub body: Vec<SlideStmt>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Statement {
     Slide {
         title: SlideString,

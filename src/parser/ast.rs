@@ -12,6 +12,7 @@ pub enum Atom {
     String(Box<SlideString>),
     Tuple(Vec<Expression>),
     Struct(String, Vec<(String, Expression)>),
+    Function(Box<UnnamedFunction>)
 }
 
 #[derive(Debug, Clone)]
@@ -48,26 +49,26 @@ pub enum SlideStmt {
     Let(String, Expression),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Slide {
     pub title: SlideString,
     pub body: Vec<SlideStmt>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Template {
     pub name: String,
     pub body: Vec<SlideStmt>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Field {
     pub name: String,
     pub default: Option<Expression>,
     pub field_type: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TypeDef {
     Enum {
         name: String,
@@ -79,12 +80,12 @@ pub enum TypeDef {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Theme {
     pub name: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TopLevel {
     Slide(Slide),
     Theme(Theme),
@@ -92,10 +93,41 @@ pub enum TopLevel {
     TypeDef(TypeDef),
     Let(String, Expression),
     Title(SlideString),
+    Function(NamedFunction),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Program {
     pub title: SlideString,
     pub statements: Vec<TopLevel>,
+}
+
+#[derive(Debug, Clone)]
+pub enum FunctionStatement {
+    Let(String, Expression),
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionBody {
+    pub stmts: Vec<FunctionStatement>,
+    pub ret_expr: Option<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionSignature {
+    pub params: Vec<(String, String)>,
+    pub ret: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnnamedFunction {
+    pub body: FunctionBody,
+    pub signature: FunctionSignature,
+}
+
+#[derive(Debug, Clone)]
+pub struct NamedFunction {
+    pub name: String,
+    pub body: FunctionBody,
+    pub signature: FunctionSignature,
 }
