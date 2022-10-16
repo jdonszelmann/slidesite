@@ -169,7 +169,7 @@ pub fn convert_body(body: Vec<parser::SlideStmt>) -> Result<Vec<SlideStmt>> {
 
 pub fn convert_ident_or_number(i: parser::IdentifierOrNumber) -> Result<Expression> {
     Ok(match i {
-        parser::IdentifierOrNumber::Identifier(i) => Expression::Identifier(i.clone()),
+        parser::IdentifierOrNumber::Identifier(i) => Expression::Identifier(i),
         parser::IdentifierOrNumber::Number(n) => Expression::Number(n.parse()?),
     })
 }
@@ -181,8 +181,8 @@ pub fn convert_stmt(stmt: parser::SlideStmt) -> Result<SlideStmt> {
         parser::SlideStmt::Column(b) => SlideStmt::Column(convert_body(b)?),
         parser::SlideStmt::ListItem(l) => SlideStmt::ListItem(Box::new(convert_stmt(*l)?)),
         parser::SlideStmt::EnumItem(ident, stmt) => SlideStmt::EnumItem(Box::new(convert_ident_or_number(ident)?), Box::new(convert_stmt(*stmt)?)),
-        parser::SlideStmt::Marked(m, s) => SlideStmt::Marked(m.clone(), Box::new(convert_stmt(*s)?)),
-        parser::SlideStmt::Insert(i) => SlideStmt::Insert(i.clone()),
+        parser::SlideStmt::Marked(m, s) => SlideStmt::Marked(m, Box::new(convert_stmt(*s)?)),
+        parser::SlideStmt::Insert(i) => SlideStmt::Insert(i),
         parser::SlideStmt::Let(name, value) => SlideStmt::Let(name, convert_expr(value)?)
     })
 }

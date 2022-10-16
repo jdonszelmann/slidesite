@@ -35,7 +35,7 @@ pub enum Expression {
     Mul(Box<Expression>, Box<Expression>),
     Div(Box<Expression>, Box<Expression>),
     Add(Box<Expression>, Box<Expression>),
-    Call(Box<Expression>, Vec<Box<Expression>>),
+    Call(Box<Expression>, Vec<Expression>),
 }
 
 #[derive(Debug, Clone)]

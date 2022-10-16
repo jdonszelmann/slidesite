@@ -64,6 +64,12 @@ impl UndefinedVariable {
     }
 }
 
+impl Default for Scope {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Scope {
     pub fn new() -> Scope {
         Scope {
@@ -79,10 +85,10 @@ impl Scope {
 
     pub fn lookup_variable(&self, name: &str) -> Result<Value> {
         let value = self.bindings.get(name)
-            .ok_or(EvalError::UndeclaredVariable(name.to_string()))?
+            .ok_or_else(|| EvalError::UndeclaredVariable(name.to_string()))?
             .borrow()
             .as_ref()
-            .ok_or(EvalError::UndefinedVariable(name.to_string()))?
+            .ok_or_else(|| EvalError::UndefinedVariable(name.to_string()))?
             .clone();
 
         Ok(value)
@@ -219,10 +225,10 @@ impl Evaluator {
             converter::SlideStmt::ListItem(l) => SlideStmt::ListItem(Box::new(self.eval_slide_stmt(*l, scope)?.expect("slide stmt in list *never* evaluates to None"))),
             converter::SlideStmt::EnumItem(atom, stmt) => SlideStmt::EnumItem(assert_number(self.eval_expr(*atom, scope)?)?, Box::new(self.eval_slide_stmt(*stmt, scope)?.expect("slide stmt in enum *never* evaluates to None"))),
             converter::SlideStmt::Marked(m, s) => SlideStmt::Marked(
-                m.clone(),
-                Box::new(self.eval_slide_stmt(*s.clone(), scope)?.ok_or_else(|| EvalError::MarkedInvalidStatment(*s))?)
+                m,
+                Box::new(self.eval_slide_stmt(*s.clone(), scope)?.ok_or(EvalError::MarkedInvalidStatment(*s))?)
             ),
-            converter::SlideStmt::Insert(i) => SlideStmt::Insert(i.clone()),
+            converter::SlideStmt::Insert(i) => SlideStmt::Insert(i),
             converter::SlideStmt::Let(name, value) => {
                 self.eval_let(name, value, scope)?;
                 return Ok(None);

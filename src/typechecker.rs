@@ -47,7 +47,7 @@ pub enum TypeError {
 
 }
 
-pub fn typecheck(ast: &Program) -> Result<(), TypeError> {
+pub fn typecheck(_ast: &Program) -> Result<(), TypeError> {
 
 
     Ok(())

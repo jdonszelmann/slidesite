@@ -158,7 +158,7 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
         identifier.clone().map(Atom::Identifier),
         string.clone().map(|i| Atom::String(Box::new(i))),
         tuple,
-        function_expr.clone().map(|i| Atom::Function(i)),
+        function_expr.clone().map(Atom::Function),
     )).dy();
 
     let atom_expr = choice((
@@ -510,10 +510,10 @@ pub fn parse(source: &str) -> Result<Program, Vec<Simple<char>>> {
     parser().parse(source)
 }
 
-pub fn format_errors(errs: &Vec<Simple<char>>, src: &str) -> String {
+pub fn format_errors(errs: &[Simple<char>], src: &str) -> String {
     let mut res = Cursor::new(Vec::new());
 
-    errs.into_iter()
+    errs.iter()
         .map(|e| e.clone().map(|c| c.to_string()))
         .for_each(|e| {
             let report = Report::build(ReportKind::Error, (), e.span().start);
@@ -580,8 +580,8 @@ pub fn format_errors(errs: &Vec<Simple<char>>, src: &str) -> String {
             };
 
             report.finish().write(Source::from(src), &mut res).unwrap();
-            res.write(&[b'\n']).unwrap();
-            res.write(&[b'\n']).unwrap();
+            res.write_all(&[b'\n']).unwrap();
+            res.write_all(&[b'\n']).unwrap();
         });
 
     String::from_utf8(res.into_inner()).unwrap()

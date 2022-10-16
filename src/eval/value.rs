@@ -19,7 +19,7 @@ impl Display for Value {
             Value::Number(i) => write!(f, "{i}"),
             Value::String(i) => write!(f, "{i}"),
             Value::Tuple(i) if i.len() != 1 => {
-                write!(f, "({})", i.into_iter().map(ToString::to_string).join(","))
+                write!(f, "({})", i.iter().map(ToString::to_string).join(","))
             },
             Value::Tuple(i) => {
                 write!(f, "({},)", i[0])
