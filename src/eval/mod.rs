@@ -1,7 +1,10 @@
+use std::cell::RefCell;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::rc::Rc;
 use convert_case::{Case, Casing};
-use crate::converter::{Atom, Expression, Program, SlideString, StringCharacter};
-use crate::eval::value::{SlideShow, SlideStmt, Theme, Value, Slide, Template};
+use crate::converter::{Expression, Program, SlideString, Statement, StringCharacter};
+use crate::eval::value::{SlideShow, SlideStmt, Value, Slide};
 use thiserror::Error;
 use crate::converter;
 
@@ -10,121 +13,204 @@ pub mod value;
 #[derive(Debug, Error)]
 pub enum EvalError {
     #[error("Expected a number for the index of an enum item, but found {0}")]
-    NotANumberInEnum(Value)
+    NotANumberInEnum(Value),
+
+    #[error("variable was never declared")]
+    UndeclaredVariable(String),
+
+    #[error("variable was declared but not yet defined")]
+    UndefinedVariable(String),
+
+    #[error("you cannot mark a {0:?}")]
+    MarkedInvalidStatment(converter::SlideStmt),
 }
 
 type Result<T> = std::result::Result<T, EvalError>;
 
 pub fn eval_ast(ast: Program) -> Result<SlideShow> {
     let mut e = Evaluator::new();
+    let mut scope = Scope::new();
+    let slides = e.eval_stmts(ast.statements, &mut scope)?;
 
     Ok(SlideShow {
-        title: e.eval_string(ast.title)?,
-        themes: ast.themes.into_iter().map(|t| e.eval_theme(t)).collect::<Result<_>>()?,
-        slides: e.eval_slides(ast.slides)?,
-        templates: ast.templates.into_iter().map(|t| e.eval_template(t)).collect::<Result<_>>()?,
+        title: e.title,
+        slides,
     })
 }
 
-struct Evaluator {}
+#[derive(Debug)]
+struct Scope {
+    bindings: HashMap<String, Rc<RefCell<Option<Value>>>>
+}
+
+pub struct UndefinedVariable(Rc<RefCell<Option<Value>>>);
+impl UndefinedVariable {
+    pub fn define(self, value: Value) {
+        *self.0.borrow_mut() = Some(value);
+    }
+}
+
+impl Scope {
+    pub fn new() -> Scope {
+        Scope {
+            bindings: Default::default()
+        }
+    }
+
+    pub fn declare_variable(&mut self, name: String) -> UndefinedVariable {
+        let value = Rc::new(RefCell::new(None));
+        self.bindings.insert(name, Rc::clone(&value));
+        UndefinedVariable(value)
+    }
+
+    pub fn lookup_variable(&self, name: &str) -> Result<Value> {
+        let value = self.bindings.get(name)
+            .ok_or(EvalError::UndeclaredVariable(name.to_string()))?
+            .borrow()
+            .as_ref()
+            .ok_or(EvalError::UndefinedVariable(name.to_string()))?
+            .clone();
+
+        Ok(value)
+    }
+}
+
+struct Evaluator {
+    title: Option<String>,
+}
 
 impl Evaluator {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            title: None
+        }
     }
 
-    pub fn eval_theme(&mut self, c: converter::Theme) -> Result<Theme> {
-        Ok(Theme {
-            name: self.eval_string(c.name)?,
-            body: vec![],
-        })
-    }
-
-    pub fn eval_template(&mut self, c: converter::Template) -> Result<Template> {
-        Ok(Template {
-            name: self.eval_string(c.name)?,
-            body: vec![],
-        })
-    }
-
-    pub fn eval_string_char(&mut self, c: StringCharacter) -> Result<String> {
+    pub fn eval_string_char(&mut self, c: StringCharacter, scope: &mut Scope) -> Result<String> {
         Ok(match c {
             StringCharacter::Char(c) => c.to_string(),
-            StringCharacter::Expr(e) => self.eval_expr(e)?.to_string()
+            StringCharacter::Expr(e) => self.eval_expr(e, scope)?.to_string()
         })
     }
 
-    pub fn eval_string(&mut self, string: SlideString) -> Result<String> {
+    pub fn eval_string(&mut self, string: SlideString, scope: &mut Scope) -> Result<String> {
         string.0.into_iter()
-            .map(|c| self.eval_string_char(c))
+            .map(|c| self.eval_string_char(c, scope))
             .collect::<Result<_>>()
     }
 
-    pub fn eval_expr(&mut self, c: Expression) -> Result<Value> {
-        todo!()
+    pub fn eval_expr(&mut self, e: Expression, scope: &mut Scope) -> Result<Value> {
+        Ok(match e {
+            Expression::Identifier(name) => scope.lookup_variable(&name)?,
+            Expression::Number(n) => Value::Number(n),
+            Expression::String(s) => Value::String(self.eval_string(*s, scope)?),
+            Expression::Tuple(v) => Value::Tuple(v.into_iter().map(|e| self.eval_expr(e, scope)).collect::<Result<_>>()?),
+            Expression::Sub(_, _) => todo!(),
+            Expression::Mul(_, _) => todo!(),
+            Expression::Div(_, _) => todo!(),
+            Expression::Add(_, _) => todo!(),
+            Expression::Call(_, _) => todo!(),
+            Expression::StructInstance { name: _, assignments } => {
+                Value::Struct(
+                    assignments
+                        .into_iter()
+                        .map(|(n, e)| Ok((n, self.eval_expr(e, scope)?)))
+                        .collect::<Result<_>>()?
+                )
+            },
+            Expression::SlideBody(_) => todo!(),
+        })
     }
 
-    fn eval_slides(&mut self, slides: Vec<converter::Slide>) -> Result<Vec<Slide>> {
+    fn eval_let(&mut self, name: String, value: Expression, scope: &mut Scope) -> Result<()> {
+        let var = scope.declare_variable(name);
+        let value = self.eval_expr(value, scope)?;
+        var.define(value);
+
+        Ok(())
+    }
+
+    fn set_title(&mut self, title: String) {
+        if let Some(ref i) = self.title {
+            eprintln!("overwriting title from {i} to {title}");
+        }
+
+        self.title = Some(title)
+    }
+
+    fn eval_stmts(&mut self, statements: Vec<converter::Statement>, scope: &mut Scope) -> Result<Vec<Slide>> {
         let mut ctr = HashMap::new();
-        let mut pre_ctr = HashMap::new();
-        let mut res = Vec::new();
-        let mut titles = Vec::new();
+        let mut slides = Vec::new();
 
-        for i in &slides {
-            let title = self.eval_string(i.title.clone())?;
-            titles.push(title.clone());
-            *pre_ctr.entry(title).or_insert(0) += 1;
+        for stmt in statements.into_iter() {
+            match stmt {
+                converter::Statement::Slide { body, identifier, title } => {
+                    let title = self.eval_string(title, scope)?;
+
+                    let identifier = identifier.unwrap_or_else(|| match ctr.entry(title.clone()) {
+                        Entry::Vacant(v) => {
+                            v.insert(1);
+
+                            title.clone().to_case(Case::Kebab)
+                        }
+                        Entry::Occupied(mut o) => {
+                            *o.get_mut() += 1;
+
+                            format!("{} {}", title, o.get()).to_case(Case::Kebab)
+                        }
+                    });
+
+                    slides.push(Slide {
+                        title,
+                        identifier,
+                        theme: None,
+                        body: self.eval_body(body, scope)?,
+                    });
+                }
+                Statement::Let { name, value } => {
+                    println!("{:?} {:?} {:?}", name, value, scope);
+
+                    self.eval_let(name, value, scope)?
+                },
+                Statement::Title(t) => {
+                    let title = self.eval_string(t, scope)?;
+                    self.set_title(title)
+                }
+            }
         }
 
-        for (slide, title) in slides.into_iter().zip(titles) {
-            let identifier = if pre_ctr.get(&title).expect("must be inserted") > &1 {
-                let mut count = ctr.entry(title.clone()).or_insert(0);
-                *count += 1;
-
-
-                format!("{} {}", title, count).to_case(Case::Kebab)
-            } else {
-                title.clone().to_case(Case::Kebab)
-            };
-
-            res.push(Slide {
-                title,
-                identifier,
-                body: self.eval_body(slide.body)?,
-            });
-        }
-
-        Ok(res)
+        Ok(slides)
     }
 
-    pub fn eval_body(&mut self, body: Vec<converter::SlideStmt>) -> Result<Vec<SlideStmt>> {
+    pub fn eval_body(&mut self, body: Vec<converter::SlideStmt>, scope: &mut Scope) -> Result<Vec<SlideStmt>> {
         let mut res = Vec::new();
 
         for i in body {
-            res.push(self.eval_stmt(i)?);
+            if let Some(i) = self.eval_slide_stmt(i, scope)? {
+                res.push(i);
+            }
         }
 
         Ok(res)
     }
 
-    pub fn eval_atom(&mut self, i: converter::Atom) -> Result<Value> {
-        Ok(match i {
-            Atom::Identifier(_) => todo!(),
-            Atom::Number(n) => Value::Number(n),
-            Atom::String(s) => Value::String(self.eval_string(*s)?)
-        })
-    }
-
-    pub fn eval_stmt(&mut self, stmt: converter::SlideStmt) -> Result<SlideStmt> {
-        Ok(match stmt {
-            converter::SlideStmt::String(s) => SlideStmt::String(self.eval_string(s)?),
-            converter::SlideStmt::Block(b) => SlideStmt::Block(self.eval_body(b)?),
-            converter::SlideStmt::Column(b) => SlideStmt::Column(self.eval_body(b)?),
-            converter::SlideStmt::ListItem(l) => SlideStmt::ListItem(Box::new(self.eval_stmt(*l)?)),
-            converter::SlideStmt::EnumItem(atom, stmt) => SlideStmt::EnumItem(assert_number(self.eval_atom(atom)?)?, Box::new(self.eval_stmt(*stmt)?)),
-            converter::SlideStmt::Marked(m, s) => SlideStmt::Marked(m.clone(), Box::new(self.eval_stmt(*s)?)),
+    pub fn eval_slide_stmt(&mut self, stmt: converter::SlideStmt, scope: &mut Scope) -> Result<Option<SlideStmt>> {
+        Ok(Some(match stmt {
+            converter::SlideStmt::String(s) => SlideStmt::String(self.eval_string(s, scope)?),
+            converter::SlideStmt::Block(b) => SlideStmt::Block(self.eval_body(b, scope)?),
+            converter::SlideStmt::Column(b) => SlideStmt::Column(self.eval_body(b, scope)?),
+            converter::SlideStmt::ListItem(l) => SlideStmt::ListItem(Box::new(self.eval_slide_stmt(*l, scope)?.expect("slide stmt in list *never* evaluates to None"))),
+            converter::SlideStmt::EnumItem(atom, stmt) => SlideStmt::EnumItem(assert_number(self.eval_expr(*atom, scope)?)?, Box::new(self.eval_slide_stmt(*stmt, scope)?.expect("slide stmt in enum *never* evaluates to None"))),
+            converter::SlideStmt::Marked(m, s) => SlideStmt::Marked(
+                m.clone(),
+                Box::new(self.eval_slide_stmt(*s.clone(), scope)?.ok_or_else(|| EvalError::MarkedInvalidStatment(*s))?)
+            ),
             converter::SlideStmt::Insert(i) => SlideStmt::Insert(i.clone()),
-        })
+            converter::SlideStmt::Let(name, value) => {
+                self.eval_let(name, value, scope)?;
+                return Ok(None);
+            },
+        }))
     }
 }
 

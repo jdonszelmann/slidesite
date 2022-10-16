@@ -1,9 +1,26 @@
+struct Color {
+    r: int,
+    g: int,
+    b: int,
+}
+
+struct Theme {
+    background: Color,
+    foreground: Color = -background,
+}
 
 theme example {
+    background = (255, 0, 0);
 }
-    // background = ;
 
-// title test
+// this is the desugaring of theme example {}
+let example = Theme {
+    background = (255, 0, 0),
+};
+
+let name = "TEST NAME";
+
+title "{name}"
 
 slide Introduction {
     column {
@@ -12,19 +29,19 @@ slide Introduction {
     column {}
 }
 
-slide Test 1 {
+slide "{name} 1" {
 
 }
-slide Test 2 {
+slide "{name} 2" {
 
 }
-slide Test 3 {
+slide "{name} 3" {
 
 }
-slide Test 4 {
+slide "{name} 4" {
 
 }
-slide Test 5 {
+slide "{name} 5" {
 
 }
 

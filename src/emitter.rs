@@ -8,10 +8,11 @@ pub enum EmitError {
 }
 
 pub fn emit(ast: SlideShow) -> Result<String, EmitError> {
-    let mut title = ast.title.trim();
-    if title == "" {
-        title = "Placeholder Title";
-    }
+    let title = ast.title.unwrap_or_else(|| {
+        eprintln!("no title set. using placeholder title");
+        "Placeholder Title".to_string()
+    });
+    let title = title.trim();
 
     let res: PreEscaped<String> = html! {
         (DOCTYPE)

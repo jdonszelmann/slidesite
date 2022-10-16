@@ -1,13 +1,9 @@
-
 const slides = new Map();
 let mode = "home";
 let homepage = null;
 let slides_elem = null;
 let active_id = null;
-
-document.oninput = () => {
-
-}
+let active_index = null;
 
 class Slide {
     name
@@ -18,6 +14,7 @@ class Slide {
         this.identifier = identifier;
     }
 }
+
 const params = new Proxy(new URLSearchParams(window.location.search), {
     get: (searchParams, prop) => searchParams.get(prop),
 });
@@ -40,9 +37,9 @@ document.onreadystatechange = () => {
     if (typeof params.slide !== "undefined") {
         const slidenum = parseInt(params.slide);
         if (!isNaN(slidenum)) {
-            goto_slide(slides.get(slidenum).identifier)
+            goto_slide_number(slidenum);
         } else {
-            if (!goto_slide(params.slide)){
+            if (!goto_slide(params.slide)) {
                 for (const i of slides.values()) {
                     if (i.name.toLowerCase().includes(params.slide.toLowerCase())) {
                         goto_slide(i.identifier);
@@ -52,11 +49,30 @@ document.onreadystatechange = () => {
             }
         }
     }
+
+    window.addEventListener("keydown", e => {
+        switch (e.key) {
+            case 'Down':
+            case 'ArrowDown':
+            case 'Right':
+            case 'ArrowRight':
+                next_slide();
+                break;
+
+            case 'Up':
+            case 'ArrowUp':
+            case 'Leftt':
+            case 'ArrowLeft':
+                prev_slide();
+                break;
+
+        }
+    });
 };
 
 function remove_js_styles() {
     let styled = document.querySelectorAll("*[style]");
-    for(let i=0; i<styled.length;i++) {
+    for (let i = 0; i < styled.length; i++) {
         styled[i].removeAttribute("style");
     }
 }
@@ -84,8 +100,10 @@ function find_active_slide() {
 
     if (lowest_id == null) {
         active_id = slides.get(slides.size).identifier;
+        active_index = slides.size;
     } else {
         active_id = lowest_id;
+        active_index = lowest;
     }
 
     highlight_active_sidebar();
@@ -100,6 +118,23 @@ function highlight_active_sidebar() {
         const id = "sidebar-" + active_id;
         document.getElementById(id).classList.add("active");
     }
+}
+
+function next_slide() {
+    if (active_index === null) {
+        return;
+    }
+
+    goto_slide_number(active_index + 1);
+}
+
+function prev_slide() {
+    if (active_index === null) {
+        return;
+    }
+
+    goto_slide_number(active_index - 1);
+
 }
 
 function home_mode() {
@@ -123,10 +158,18 @@ function slides_mode() {
 
 function scroll_through_slides() {
     slides_mode();
-    goto_slide(slides.get(1).identifier);
+    goto_slide(slides.get(1).identifier, true);
 }
 
-function goto_slide(identifier) {
+function goto_slide_number(num) {
+    const slide = slides.get(num);
+
+    if (typeof slide !== "undefined" && slide !== null) {
+        goto_slide(slide.identifier)
+    }
+}
+
+function goto_slide(identifier, immediately = false) {
     const slide = document.getElementById(identifier);
 
     if (typeof slide === "undefined" || slide == null) {
@@ -134,7 +177,11 @@ function goto_slide(identifier) {
     }
 
     slides_mode();
-    slide.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if (immediately) {
+        slide.scrollIntoView();
+    } else {
+        slide.scrollIntoView({behavior: 'smooth', block: 'center'});
+    }
 
     return true;
 }

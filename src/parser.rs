@@ -4,7 +4,6 @@ use chumsky::error::Simple;
 use chumsky::{Parser, text};
 use chumsky::prelude::{just, take_until, filter, choice, end, empty, recursive, Recursive};
 use chumsky::text::TextParser;
-use clap::builder::TypedValueParser;
 
 #[derive(Debug, Clone)]
 pub enum IdentifierOrNumber {
@@ -17,6 +16,8 @@ pub enum Atom {
     Identifier(String),
     Number(String),
     String(Box<SlideString>),
+    Tuple(Vec<Expression>),
+    Struct(String, Vec<(String, Expression)>),
 }
 
 #[derive(Debug, Clone)]
@@ -36,7 +37,7 @@ pub enum StringCharacter {
 }
 
 #[derive(Debug, Clone)]
-pub enum SlideString{
+pub enum SlideString {
     Complex(Vec<StringCharacter>),
     Simple(String),
 }
@@ -50,6 +51,7 @@ pub enum SlideStmt {
     EnumItem(IdentifierOrNumber, Box<SlideStmt>),
     Marked(String, Box<SlideStmt>),
     Insert(String),
+    Let(String, Expression),
 }
 
 #[derive(Debug)]
@@ -60,13 +62,32 @@ pub struct Slide {
 
 #[derive(Debug)]
 pub struct Template {
-    pub name: SlideString,
+    pub name: String,
     pub body: Vec<SlideStmt>,
 }
 
 #[derive(Debug)]
+pub struct Field {
+    pub name: String,
+    pub default: Option<Expression>,
+    pub field_type: String,
+}
+
+#[derive(Debug)]
+pub enum TypeDef {
+    Enum {
+        name: String,
+        variants: Vec<TypeDef>,
+    },
+    Struct {
+        name: String,
+        fields: Vec<Field>,
+    },
+}
+
+#[derive(Debug)]
 pub struct Theme {
-    pub name: SlideString,
+    pub name: String,
 }
 
 #[derive(Debug)]
@@ -74,14 +95,15 @@ pub enum TopLevel {
     Slide(Slide),
     Theme(Theme),
     Template(Template),
+    TypeDef(TypeDef),
+    Let(String, Expression),
+    Title(SlideString),
 }
 
 #[derive(Debug)]
 pub struct Program {
     pub title: SlideString,
-    pub themes: Vec<Theme>,
-    pub slides: Vec<Slide>,
-    pub templates: Vec<Template>,
+    pub statements: Vec<TopLevel>,
 }
 
 fn char_to_string(c: char) -> StringCharacter {
@@ -90,6 +112,7 @@ fn char_to_string(c: char) -> StringCharacter {
 
 fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
     let comment = just("//").then(take_until(just('\n'))).padded();
+    let op = |c| just(c).padded();
 
     let bare_name = filter(|c: &char| !['"', '\'', '\n', '\r', '{', '}', ';'].contains(c))
         .repeated()
@@ -104,6 +127,36 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
     ));
 
     let mut expression = Recursive::<_, _, Simple<char>>::declare();
+
+    let statement_terminator = choice((
+        just(';').to(()),
+        just('\n').to(()),
+        end(),
+    ));
+
+    let assignment = identifier
+        .padded()
+        .then_ignore(op('='))
+        .then(expression.clone())
+        ;
+
+    let assignment_comma_seq = assignment
+        .clone()
+        .padded()
+        .padded_by(comment.repeated())
+        .separated_by(op(','))
+        .allow_trailing()
+        .padded();
+
+    let assignment_seq = assignment
+        .clone()
+        .padded()
+        .padded_by(comment.repeated())
+        .separated_by(statement_terminator.clone())
+        .allow_trailing()
+        .padded();
+
+    let let_assignment = text::keyword("let").ignore_then(assignment.clone());
 
     let interpolation = expression
         .clone()
@@ -121,7 +174,7 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
         interpolation.map(StringCharacter::Expr)
     ));
 
-    let single_quote_string_char = choice((escape.clone(),filter(|c| *c != '\'').map(char_to_string)));
+    let single_quote_string_char = choice((escape.clone(), filter(|c| *c != '\'').map(char_to_string)));
     let double_quote_string_char = choice((escape, filter(|c| *c != '\"').map(char_to_string)));
 
     let single_quote_string = just('\'')
@@ -138,17 +191,59 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
 
     let string = choice((single_quote_string, double_quote_string));
 
+    let long_tuple = expression
+        .clone()
+        .separated_by(op(','))
+        .at_least(2)
+        .allow_trailing()
+        .padded()
+        .delimited_by(just('('), just(')'))
+        .map(Atom::Tuple);
+
+    let unit = just('(').padded().then(just(')')).padded().to(Atom::Tuple(vec![]));
+    let one_tuple = op('(')
+        .ignore_then(expression.clone())
+        .then_ignore(op(','))
+        .then_ignore(op(')'))
+        .map(|i| Atom::Tuple(vec![i]));
+
+    let tuple = choice((
+        unit,
+        one_tuple,
+        long_tuple,
+    ));
+
+    let struct_instantiation =
+        identifier
+        .padded()
+        .then(
+            assignment_comma_seq
+                .clone()
+                .padded()
+                .padded_by(comment.repeated())
+                .delimited_by(
+                    just('{'), just('}'),
+                )
+        ).map(|(name, assignments)| {
+        Atom::Struct(name, assignments)
+    });
+
     let atom = choice((
+        struct_instantiation,
         number.map(Atom::Number),
         identifier.map(Atom::Identifier),
         string.clone().map(|i| Atom::String(Box::new(i))),
+        tuple,
     ));
 
-    let op = |c| just(c).padded();
+    let atom_expr = choice((
+        atom.map(Expression::Atom),
+        expression.clone().padded().delimited_by(just('('), just(')')).padded()
+    ));
 
     let unary = op('-')
         .repeated()
-        .then(atom.map(Expression::Atom))
+        .then(atom_expr)
         .foldr(|_op, rhs| Expression::Neg(Box::new(rhs)));
 
     let product = unary.clone()
@@ -174,8 +269,6 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
         bare_name,
     )).padded();
 
-    let statement_terminator = choice((just(';'), just('\n')));
-
     let stmtseq = recursive(|stmtseq| {
         let slidestmt = |do_delimited: bool| {
             let seq = stmtseq.clone();
@@ -199,7 +292,7 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
 
             let block = bare_block.map(SlideStmt::Block);
 
-            recursive(|stmt| {
+            recursive(|_stmt| {
                 let item_content = choice((
                     block.clone(),
                     string.clone().map(SlideStmt::String),
@@ -212,16 +305,17 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
                     .map(|(_, i)| SlideStmt::Insert(i));
 
                 let list_item = choice((just("-"), just("*"))).padded().then(item_content.clone())
-                    .map(|(_, i) | SlideStmt::ListItem(Box::new(i)));
+                    .map(|(_, i)| SlideStmt::ListItem(Box::new(i)));
 
                 let enum_item = identifier_or_number.then(just(".")).padded().then(item_content)
-                    .map(|((num, _), i) | SlideStmt::EnumItem(num, Box::new(i)));
+                    .map(|((num, _), i)| SlideStmt::EnumItem(num, Box::new(i)));
 
                 let with_terminator = choice((
                     list_item,
                     enum_item,
                     string.clone().map(SlideStmt::String),
                     insert,
+                    let_assignment.clone().map(|(name, expr)| SlideStmt::Let(name, expr)),
                 ));
 
                 let stmt = choice((
@@ -229,7 +323,7 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
                     column,
                     with_terminator
                         .then_ignore(filter(|i: &char| char::is_whitespace(*i) && *i != '\n').repeated().or_not())
-                        .then_ignore(statement_terminator.repeated().exactly(repeat)).padded(),
+                        .then_ignore(statement_terminator.clone().repeated().exactly(repeat)).padded(),
                 )).padded();
 
                 let marked = identifier
@@ -273,7 +367,7 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
             just('{'), just('}'),
         );
 
-    let themebody = stmtseq
+    let themebody = assignment_seq
         .padded()
         .padded_by(comment.repeated())
         .delimited_by(
@@ -291,7 +385,7 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
 
     let template = empty()
         .then_ignore(text::keyword("template").padded())
-        .then(name.clone())
+        .then(identifier.clone())
         .then(slidebody)
         .map(|((_, name), body)| Template {
             name,
@@ -299,39 +393,100 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
         });
 
     let theme = text::keyword("theme").padded()
-        .then(name.clone())
+        .then(identifier.clone())
+        .padded()
         .then(themebody)
+
         .map(|((_, name), _)| Theme {
             name,
         });
+
+    let field = identifier.clone()
+        .padded()
+        .then_ignore(just(':'))
+        .padded()
+        .then(identifier.clone())
+        .padded()
+        .then(
+            just('=')
+                .padded()
+                .ignore_then(expression)
+                .or_not()
+        )
+        .map(|((name, ty), expr)| Field {
+            name,
+            default: expr,
+            field_type: ty,
+        });
+
+    let structbody = field
+        .padded()
+        .padded_by(comment.repeated())
+        .separated_by(just(','))
+        .allow_trailing()
+        .padded()
+        .padded_by(comment.repeated())
+        .delimited_by(
+            just('{'), just('}'),
+        );
+
+    let named_struct_body = identifier.clone()
+        .padded()
+        .then(structbody)
+        .map(|(name, fields)| TypeDef::Struct {
+            name,
+            fields,
+        });
+
+    let enumdef = text::keyword("enum")
+        .padded()
+        .then(identifier.clone())
+        .padded()
+        .then_ignore(just('='))
+        .padded()
+        .then(
+            named_struct_body
+                .clone()
+                .padded()
+                .padded_by(comment.repeated())
+                .separated_by(just('|'))
+        )
+        .padded()
+        .padded_by(comment.repeated())
+        .then_ignore(statement_terminator.clone())
+        .map(|((_, name), variants)| TypeDef::Enum {
+            name,
+            variants,
+        });
+
+    let structdef = text::keyword("struct")
+        .padded()
+        .ignore_then(named_struct_body);
+
+    let typedef = choice((structdef, enumdef));
+
+    let title = text::keyword("title")
+        .padded()
+        .ignore_then(name);
 
     let toplevel = choice::<_, Simple<char>>((
         slide.map(TopLevel::Slide),
         theme.map(TopLevel::Theme),
         template.map(TopLevel::Template),
+        typedef.map(TopLevel::TypeDef),
+        let_assignment
+            .then_ignore(statement_terminator)
+            .map(|(name, expr)| TopLevel::Let(name, expr)),
+        title.map(TopLevel::Title),
     ))
         .padded_by(comment.repeated())
         .padded();
 
     toplevel.repeated()
-        .map(|parsed| {
-            let mut themes = Vec::new();
-            let mut slides = Vec::new();
-            let mut templates = Vec::new();
-
-            for i in parsed {
-                match i {
-                    TopLevel::Slide(s) => slides.push(s),
-                    TopLevel::Theme(t) => themes.push(t),
-                    TopLevel::Template(t) => templates.push(t),
-                }
-            }
-
+        .map(|toplevels| {
             Program {
                 title: SlideString::Simple("".to_string()),
-                themes,
-                slides,
-                templates,
+                statements: toplevels,
             }
         }).then_ignore(end())
 }

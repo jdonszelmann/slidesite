@@ -1,14 +1,28 @@
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use itertools::Itertools;
 
 #[derive(Debug, Clone)]
 pub enum Value {
     Number(i64),
     String(String),
+    Tuple(Vec<Value>),
+    Struct(HashMap<String, Value>)
 }
 
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            Value::Number(i) => write!(f, "{i}"),
+            Value::String(i) => write!(f, "{i}"),
+            Value::Tuple(i) if i.len() != 1 => {
+                write!(f, "({})", i.into_iter().map(ToString::to_string).join(","))
+            },
+            Value::Tuple(i) => {
+                write!(f, "({},)", i[0])
+            }
+            Value::Struct(_) => todo!(),
+        }
     }
 }
 
@@ -27,6 +41,7 @@ pub enum SlideStmt {
 pub struct Slide {
     pub title: String,
     pub identifier: String,
+    pub theme: Option<Theme>,
 
     pub body: Vec<SlideStmt>,
 }
@@ -38,15 +53,7 @@ pub struct Theme {
 }
 
 #[derive(Debug)]
-pub struct Template {
-    pub name: String,
-    pub body: Vec<SlideStmt>,
-}
-
-#[derive(Debug)]
 pub struct SlideShow {
-    pub title: String,
-    pub themes: Vec<Theme>,
+    pub title: Option<String>,
     pub slides: Vec<Slide>,
-    pub templates: Vec<Template>,
 }

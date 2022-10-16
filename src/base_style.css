@@ -96,7 +96,6 @@ body {
     overflow-y: scroll;
     scroll-snap-type: y mandatory;
     background-color: white;
-
 }
 
 .slide {
@@ -106,7 +105,7 @@ body {
 }
 
 .slide + .slide {
-    border: 1px solid black;
+    border-top: 1px solid black;
 }
 
 .slide * {
