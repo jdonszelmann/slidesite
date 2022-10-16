@@ -1,7 +1,7 @@
+use crate::converter::Program;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use crate::converter::Program;
 use thiserror::Error;
 
 pub enum Type {
@@ -10,7 +10,6 @@ pub enum Type {
     Template,
     ListItem,
     EnumItem,
-
 }
 
 struct InnerObject {
@@ -22,11 +21,8 @@ struct InnerObject {
 pub struct Object(Rc<RefCell<Object>>);
 
 pub enum TypeTerm {
-    Constructor {
-        name: Type,
-        generics: Vec<TypeTerm>,
-    },
-    Variable(usize)
+    Constructor { name: Type, generics: Vec<TypeTerm> },
+    Variable(usize),
 }
 
 pub enum Constraint {
@@ -34,7 +30,7 @@ pub enum Constraint {
 }
 
 pub struct Solver {
-    constraints: Vec<Constraint>
+    constraints: Vec<Constraint>,
 }
 
 pub struct ConstraintContext {
@@ -43,13 +39,8 @@ pub struct ConstraintContext {
 }
 
 #[derive(Error, Debug)]
-pub enum TypeError {
-
-}
+pub enum TypeError {}
 
 pub fn typecheck(_ast: &Program) -> Result<(), TypeError> {
-
-
     Ok(())
 }
-

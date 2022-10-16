@@ -1,4 +1,3 @@
-
 #[derive(Debug, Clone)]
 pub enum IdentifierOrNumber {
     Identifier(String),
@@ -12,7 +11,7 @@ pub enum Atom {
     String(Box<SlideString>),
     Tuple(Vec<Expression>),
     Struct(String, Vec<(String, Expression)>),
-    Function(Box<UnnamedFunction>)
+    Function(Box<UnnamedFunction>),
 }
 
 #[derive(Debug, Clone)]

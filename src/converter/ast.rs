@@ -1,4 +1,3 @@
-
 #[derive(Debug, Clone)]
 pub struct FunctionBody {
     pub stmts: Vec<Statement>,
@@ -27,7 +26,7 @@ pub enum Expression {
     Tuple(Vec<Expression>),
     StructInstance {
         name: String,
-        assignments: Vec<(String, Expression)>
+        assignments: Vec<(String, Expression)>,
     },
     Function(Function),
 

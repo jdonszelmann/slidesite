@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use itertools::Itertools;
 use crate::converter::Function;
 use crate::eval::Scope;
+use itertools::Itertools;
+use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -20,13 +20,18 @@ impl Display for Value {
             Value::String(i) => write!(f, "{i}"),
             Value::Tuple(i) if i.len() != 1 => {
                 write!(f, "({})", i.iter().map(ToString::to_string).join(","))
-            },
+            }
             Value::Tuple(i) => {
                 write!(f, "({},)", i[0])
             }
             Value::Struct(_) => todo!(),
-            Value::Function(Function{name: Some(name), ..}, _) => write!(f, "<function {name}>"),
-            Value::Function(_, _) => write!(f, "<unnamed function>")
+            Value::Function(
+                Function {
+                    name: Some(name), ..
+                },
+                _,
+            ) => write!(f, "<function {name}>"),
+            Value::Function(_, _) => write!(f, "<unnamed function>"),
         }
     }
 }
@@ -54,7 +59,7 @@ pub struct Slide {
 #[derive(Debug)]
 pub struct Theme {
     pub name: String,
-    pub body: Vec<SlideStmt>
+    pub body: Vec<SlideStmt>,
 }
 
 #[derive(Debug)]
