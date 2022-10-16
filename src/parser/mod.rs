@@ -1,109 +1,22 @@
 use std::io::{Cursor, Write};
+use std::rc::Rc;
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 use chumsky::error::Simple;
 use chumsky::{Parser, text};
 use chumsky::prelude::{just, take_until, filter, choice, end, empty, recursive, Recursive};
 use chumsky::text::TextParser;
 
-#[derive(Debug, Clone)]
-pub enum IdentifierOrNumber {
-    Identifier(String),
-    Number(String),
+mod ast;
+pub use ast::*;
+
+trait Dy<A, B, C> {
+    fn dy(self) -> Rc<dyn Parser<A, B, Error=C>>;
 }
 
-#[derive(Debug, Clone)]
-pub enum Atom {
-    Identifier(String),
-    Number(String),
-    String(Box<SlideString>),
-    Tuple(Vec<Expression>),
-    Struct(String, Vec<(String, Expression)>),
-}
-
-#[derive(Debug, Clone)]
-pub enum Expression {
-    Atom(Atom),
-    Neg(Box<Expression>),
-    Sub(Box<Expression>, Box<Expression>),
-    Mul(Box<Expression>, Box<Expression>),
-    Div(Box<Expression>, Box<Expression>),
-    Add(Box<Expression>, Box<Expression>),
-}
-
-#[derive(Debug, Clone)]
-pub enum StringCharacter {
-    Char(char),
-    Expr(Expression),
-}
-
-#[derive(Debug, Clone)]
-pub enum SlideString {
-    Complex(Vec<StringCharacter>),
-    Simple(String),
-}
-
-#[derive(Debug, Clone)]
-pub enum SlideStmt {
-    String(SlideString),
-    Block(Vec<SlideStmt>),
-    Column(Vec<SlideStmt>),
-    ListItem(Box<SlideStmt>),
-    EnumItem(IdentifierOrNumber, Box<SlideStmt>),
-    Marked(String, Box<SlideStmt>),
-    Insert(String),
-    Let(String, Expression),
-}
-
-#[derive(Debug)]
-pub struct Slide {
-    pub title: SlideString,
-    pub body: Vec<SlideStmt>,
-}
-
-#[derive(Debug)]
-pub struct Template {
-    pub name: String,
-    pub body: Vec<SlideStmt>,
-}
-
-#[derive(Debug)]
-pub struct Field {
-    pub name: String,
-    pub default: Option<Expression>,
-    pub field_type: String,
-}
-
-#[derive(Debug)]
-pub enum TypeDef {
-    Enum {
-        name: String,
-        variants: Vec<TypeDef>,
-    },
-    Struct {
-        name: String,
-        fields: Vec<Field>,
-    },
-}
-
-#[derive(Debug)]
-pub struct Theme {
-    pub name: String,
-}
-
-#[derive(Debug)]
-pub enum TopLevel {
-    Slide(Slide),
-    Theme(Theme),
-    Template(Template),
-    TypeDef(TypeDef),
-    Let(String, Expression),
-    Title(SlideString),
-}
-
-#[derive(Debug)]
-pub struct Program {
-    pub title: SlideString,
-    pub statements: Vec<TopLevel>,
+impl<A: Clone, B, C, T> Dy<A, B, C> for T where T: Parser<A, B, Error=C> + 'static {
+    fn dy(self) -> Rc<dyn Parser<A, B, Error=C>> {
+        Rc::new(self)
+    }
 }
 
 fn char_to_string(c: char) -> StringCharacter {
@@ -111,20 +24,21 @@ fn char_to_string(c: char) -> StringCharacter {
 }
 
 fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
-    let comment = just("//").then(take_until(just('\n'))).padded();
+    let comment = just("//").then(take_until(just('\n'))).padded().dy();
     let op = |c| just(c).padded();
 
     let bare_name = filter(|c: &char| !['"', '\'', '\n', '\r', '{', '}', ';'].contains(c))
         .repeated()
-        .map(|i| SlideString::Simple(String::from_iter(i).trim().to_string()));
+        .map(|i| SlideString::Simple(String::from_iter(i).trim().to_string()))
+        .dy();
 
-    let number = text::int(10);
-    let identifier = text::ident();
+    let number = text::int(10).dy();
+    let identifier = text::ident().dy();
 
     let identifier_or_number = choice((
-        number.map(IdentifierOrNumber::Number),
-        identifier.map(IdentifierOrNumber::Identifier)
-    ));
+        number.clone().map(IdentifierOrNumber::Number),
+        identifier.clone().map(IdentifierOrNumber::Identifier)
+    )).dy();
 
     let mut expression = Recursive::<_, _, Simple<char>>::declare();
 
@@ -132,38 +46,42 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
         just(';').to(()),
         just('\n').to(()),
         end(),
-    ));
+    )).dy();
 
     let assignment = identifier
+        .clone()
         .padded()
         .then_ignore(op('='))
         .then(expression.clone())
-        ;
+        .dy();
 
     let assignment_comma_seq = assignment
         .clone()
         .padded()
-        .padded_by(comment.repeated())
+        .padded_by(comment.clone().repeated())
         .separated_by(op(','))
         .allow_trailing()
-        .padded();
+        .padded()
+        .dy();
 
     let assignment_seq = assignment
         .clone()
         .padded()
-        .padded_by(comment.repeated())
+        .padded_by(comment.clone().repeated())
         .separated_by(statement_terminator.clone())
         .allow_trailing()
-        .padded();
+        .padded()
+        .dy();
 
-    let let_assignment = text::keyword("let").ignore_then(assignment.clone());
+    let let_assignment = text::keyword("let").ignore_then(assignment.clone()).dy();
 
     let interpolation = expression
         .clone()
         .padded()
         .delimited_by(
             just('{'), just('}'),
-        );
+        )
+        .dy();
 
     let escape = choice((
         just("\\\"").to(StringCharacter::Char('\"')),
@@ -172,24 +90,26 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
         just("\\{").to(StringCharacter::Char('{')),
         just("\\}").to(StringCharacter::Char('}')),
         interpolation.map(StringCharacter::Expr)
-    ));
+    )).dy();
 
-    let single_quote_string_char = choice((escape.clone(), filter(|c| *c != '\'').map(char_to_string)));
-    let double_quote_string_char = choice((escape, filter(|c| *c != '\"').map(char_to_string)));
+    let single_quote_string_char = choice((escape.clone(), filter(|c| *c != '\'').map(char_to_string))).dy();
+    let double_quote_string_char = choice((escape, filter(|c| *c != '\"').map(char_to_string))).dy();
 
     let single_quote_string = just('\'')
         .ignore_then(single_quote_string_char.repeated())
         .then_ignore(just('\''))
         .collect::<Vec<StringCharacter>>()
-        .map(SlideString::Complex);
+        .map(SlideString::Complex)
+        .dy();
 
     let double_quote_string = just('"')
         .ignore_then(double_quote_string_char.repeated())
         .then_ignore(just('"'))
         .collect::<Vec<StringCharacter>>()
-        .map(SlideString::Complex);
+        .map(SlideString::Complex)
+        .dy();
 
-    let string = choice((single_quote_string, double_quote_string));
+    let string = choice((single_quote_string, double_quote_string)).dy();
 
     let long_tuple = expression
         .clone()
@@ -198,67 +118,72 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
         .allow_trailing()
         .padded()
         .delimited_by(just('('), just(')'))
-        .map(Atom::Tuple);
+        .map(Atom::Tuple)
+        .dy();
 
-    let unit = just('(').padded().then(just(')')).padded().to(Atom::Tuple(vec![]));
+    let unit = just('(').padded().then(just(')')).padded().to(Atom::Tuple(vec![])).dy();
     let one_tuple = op('(')
         .ignore_then(expression.clone())
         .then_ignore(op(','))
         .then_ignore(op(')'))
-        .map(|i| Atom::Tuple(vec![i]));
+        .map(|i| Atom::Tuple(vec![i]))
+        .dy();
 
     let tuple = choice((
         unit,
         one_tuple,
         long_tuple,
-    ));
+    )).dy();
 
-    let struct_instantiation =
-        identifier
+    let struct_instantiation = identifier
+        .clone()
         .padded()
         .then(
             assignment_comma_seq
                 .clone()
                 .padded()
-                .padded_by(comment.repeated())
+                .padded_by(comment.clone().repeated())
                 .delimited_by(
                     just('{'), just('}'),
                 )
         ).map(|(name, assignments)| {
         Atom::Struct(name, assignments)
-    });
+    }).dy();
 
     let atom = choice((
         struct_instantiation,
         number.map(Atom::Number),
-        identifier.map(Atom::Identifier),
+        identifier.clone().map(Atom::Identifier),
         string.clone().map(|i| Atom::String(Box::new(i))),
         tuple,
-    ));
+    )).dy();
 
     let atom_expr = choice((
         atom.map(Expression::Atom),
         expression.clone().padded().delimited_by(just('('), just(')')).padded()
-    ));
+    )).dy();
 
     let unary = op('-')
         .repeated()
         .then(atom_expr)
-        .foldr(|_op, rhs| Expression::Neg(Box::new(rhs)));
+        .foldr(|_op, rhs| Expression::Neg(Box::new(rhs)))
+        .dy();
 
     let product = unary.clone()
         .then(op('*').to(Expression::Mul as fn(_, _) -> _)
             .or(op('/').to(Expression::Div as fn(_, _) -> _))
             .then(unary)
             .repeated())
-        .foldl(|lhs, (op, rhs)| op(Box::new(lhs), Box::new(rhs)));
+        .foldl(|lhs, (op, rhs)| op(Box::new(lhs), Box::new(rhs)))
+        .dy();
 
     let sum = product.clone()
         .then(op('+').to(Expression::Add as fn(_, _) -> _)
             .or(op('-').to(Expression::Sub as fn(_, _) -> _))
             .then(product)
             .repeated())
-        .foldl(|lhs, (op, rhs)| op(Box::new(lhs), Box::new(rhs)));
+        .foldl(|lhs, (op, rhs)| op(Box::new(lhs), Box::new(rhs)))
+        .dy();
 
     expression.define(
         sum.padded()
@@ -266,9 +191,10 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
 
     let name = choice((
         string.clone(),
-        bare_name,
-    )).padded();
+        bare_name.clone(),
+    )).padded().dy();
 
+    let local_comment = comment.clone();
     let stmtseq = recursive(|stmtseq| {
         let slidestmt = |do_delimited: bool| {
             let seq = stmtseq.clone();
@@ -281,7 +207,7 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
 
             let bare_block = seq
                 .padded()
-                .padded_by(comment.repeated())
+                .padded_by(local_comment.clone().repeated())
                 .delimited_by(
                     just('{'), just('}'),
                 );
@@ -296,18 +222,18 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
                 let item_content = choice((
                     block.clone(),
                     string.clone().map(SlideStmt::String),
-                    bare_name.map(SlideStmt::String)
+                    bare_name.clone().map(SlideStmt::String)
                 ));
 
                 let insert = text::keyword("insert")
                     .padded()
-                    .then(identifier)
+                    .then(identifier.clone())
                     .map(|(_, i)| SlideStmt::Insert(i));
 
                 let list_item = choice((just("-"), just("*"))).padded().then(item_content.clone())
                     .map(|(_, i)| SlideStmt::ListItem(Box::new(i)));
 
-                let enum_item = identifier_or_number.then(just(".")).padded().then(item_content)
+                let enum_item = identifier_or_number.clone().then(just(".")).padded().then(item_content)
                     .map(|((num, _), i)| SlideStmt::EnumItem(num, Box::new(i)));
 
                 let with_terminator = choice((
@@ -327,6 +253,7 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
                 )).padded();
 
                 let marked = identifier
+                    .clone()
                     .padded()
                     .then(just(':'))
                     .padded()
@@ -338,17 +265,19 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
                     stmt
                 ))
             })
-        };
+        }.dy();
 
         let main_seq = slidestmt(true)
-            .padded_by(comment.repeated())
+            .padded_by(comment.clone().repeated())
             .padded()
-            .repeated();
+            .repeated()
+            .dy();
 
         let final_stmt = slidestmt(false)
-            .padded_by(comment.repeated())
+            .padded_by(comment.clone().repeated())
             .padded()
-            .or_not();
+            .or_not()
+            .dy();
 
         main_seq.then(final_stmt)
             .map(|(mut stmts, stmt)| {
@@ -357,22 +286,25 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
                 }
                 stmts
             })
+            .dy()
     });
 
     let slidebody = stmtseq
         .clone()
         .padded()
-        .padded_by(comment.repeated())
+        .padded_by(comment.clone().repeated())
         .delimited_by(
             just('{'), just('}'),
-        );
+        )
+        .dy();
 
     let themebody = assignment_seq
         .padded()
-        .padded_by(comment.repeated())
+        .padded_by(comment.clone().repeated())
         .delimited_by(
             just('{'), just('}'),
-        );
+        )
+        .dy();
 
     let slide = empty()
         .then_ignore(text::keyword("slide").padded())
@@ -381,7 +313,8 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
         .map(|((_, title), body)| Slide {
             title,
             body,
-        });
+        })
+        .dy();
 
     let template = empty()
         .then_ignore(text::keyword("template").padded())
@@ -390,16 +323,17 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
         .map(|((_, name), body)| Template {
             name,
             body,
-        });
+        })
+        .dy();
 
     let theme = text::keyword("theme").padded()
         .then(identifier.clone())
         .padded()
         .then(themebody)
-
         .map(|((_, name), _)| Theme {
             name,
-        });
+        })
+        .dy();
 
     let field = identifier.clone()
         .padded()
@@ -417,18 +351,20 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
             name,
             default: expr,
             field_type: ty,
-        });
+        })
+        .dy();
 
     let structbody = field
         .padded()
-        .padded_by(comment.repeated())
+        .padded_by(comment.clone().repeated())
         .separated_by(just(','))
         .allow_trailing()
         .padded()
-        .padded_by(comment.repeated())
+        .padded_by(comment.clone().repeated())
         .delimited_by(
             just('{'), just('}'),
-        );
+        )
+        .dy();
 
     let named_struct_body = identifier.clone()
         .padded()
@@ -436,7 +372,8 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
         .map(|(name, fields)| TypeDef::Struct {
             name,
             fields,
-        });
+        })
+        .dy();
 
     let enumdef = text::keyword("enum")
         .padded()
@@ -448,26 +385,29 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
             named_struct_body
                 .clone()
                 .padded()
-                .padded_by(comment.repeated())
+                .padded_by(comment.clone().repeated())
                 .separated_by(just('|'))
         )
         .padded()
-        .padded_by(comment.repeated())
+        .padded_by(comment.clone().repeated())
         .then_ignore(statement_terminator.clone())
         .map(|((_, name), variants)| TypeDef::Enum {
             name,
             variants,
-        });
+        })
+        .dy();
 
     let structdef = text::keyword("struct")
         .padded()
-        .ignore_then(named_struct_body);
+        .ignore_then(named_struct_body)
+        .dy();
 
-    let typedef = choice((structdef, enumdef));
+    let typedef = choice((structdef, enumdef)).dy();
 
     let title = text::keyword("title")
         .padded()
-        .ignore_then(name);
+        .ignore_then(name)
+        .dy();
 
     let toplevel = choice::<_, Simple<char>>((
         slide.map(TopLevel::Slide),
@@ -479,8 +419,9 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
             .map(|(name, expr)| TopLevel::Let(name, expr)),
         title.map(TopLevel::Title),
     ))
-        .padded_by(comment.repeated())
-        .padded();
+        .padded_by(comment.clone().repeated())
+        .padded()
+        .dy();
 
     toplevel.repeated()
         .map(|toplevels| {
@@ -489,6 +430,7 @@ fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
                 statements: toplevels,
             }
         }).then_ignore(end())
+        .dy()
 }
 
 pub fn parse(source: &str) -> Result<Program, Vec<Simple<char>>> {

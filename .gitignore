@@ -1,3 +1,5 @@
 /target
 output.html
 .idea
+src/highlight.min.js
+src/highlight.zip
