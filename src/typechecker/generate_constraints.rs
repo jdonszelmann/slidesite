@@ -8,7 +8,7 @@ use crate::typechecker::find_types::{TypeInfo, TypeScope};
 use crate::typechecker::Result;
 
 pub struct ConstraintContext<'src> {
-    constraints: Vec<Constraint>,
+    pub constraints: Vec<Constraint>,
     scope: TypeScope<'src>,
     var_ctr: Cell<usize>,
 }
@@ -72,7 +72,6 @@ impl<'src> ConstraintContext<'src> {
     fn equal(&mut self, a: impl Into<TypeTerm>, b: impl Into<TypeTerm>) {
         self.add_constraint(self.create_equal(a, b))
     }
-
 
     pub fn generate_constraints(&mut self, Program { statements, .. }: &'src Program) -> typechecker::Result<()> {
         let mut scope = Scope::new();
