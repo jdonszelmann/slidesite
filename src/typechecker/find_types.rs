@@ -80,7 +80,8 @@ fn convert_typedef<'src>(def: &'src TypeDef, _scope: &mut TypeScope<'src>) -> (&
                 generics: generics.clone()
             }
         ),
-        TypeDef::Trait { .. } => todo!()
+        TypeDef::Trait { .. } => todo!(),
+        TypeDef::Impl { .. } => todo!(),
     }
 }
 

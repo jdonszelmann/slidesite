@@ -38,6 +38,9 @@ pub enum Expression {
     Div(Box<Expression>, Box<Expression>),
     Add(Box<Expression>, Box<Expression>),
     Call(Box<Expression>, Vec<Expression>),
+    Index(Box<Expression>, Box<Expression>),
+    Attr(Box<Expression>, String),
+    TupleProject(Box<Expression>, u64),
 }
 
 #[derive(Debug, Clone)]
@@ -139,6 +142,21 @@ pub enum TypeDef {
         generics: Vec<String>,
     },
     Trait {
+        name: String,
+        items: Vec<Statement>,
+        generics: Vec<String>,
+        stubs: Vec<FunctionStub>,
+    },
+    Impl {
+        trait_name: Option<TypeName>,
+        name: TypeName,
+        instantiated_generics: Vec<String>,
+        body: Vec<Statement>,
+    },
+}
 
-    }
+#[derive(Debug, Clone)]
+pub struct FunctionStub {
+    pub name: String,
+    pub signature: FunctionSignature,
 }

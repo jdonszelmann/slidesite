@@ -245,6 +245,9 @@ impl<'src> ConstraintContext<'src> {
             Expression::Div(_, _) => todo!(),
             Expression::Add(_, _) => todo!(),
             Expression::Call(_, _) => todo!(),
+            Expression::Index(_, _) => todo!(),
+            Expression::Attr(_, _) => todo!(),
+            Expression::TupleProject(_, _) => todo!(),
         })
     }
 }

@@ -1,10 +1,11 @@
 use crate::parser;
 use std::num::ParseIntError;
+use itertools::{Either, Itertools};
 use thiserror::Error;
 
 mod ast;
 
-use crate::parser::{Atom, FunctionStatement, TopLevel};
+use crate::parser::{Atom, FunctionStatement, ImplItem, NamedFunction, TopLevel, Trailer, TraitItem};
 pub use ast::*;
 
 #[derive(Debug, Error)]
@@ -116,7 +117,29 @@ fn convert_expr(e: parser::Expression) -> Result<Expression> {
         parser::Expression::Add(a, b) => {
             Expression::Add(Box::new(convert_expr(*a)?), Box::new(convert_expr(*b)?))
         }
-        parser::Expression::Trailer(_, _) => todo!()
+        parser::Expression::Trailer(e, t) => {
+            t.into_iter()
+                .fold(convert_expr(*e), |expr, trailer| {
+                    Ok(match trailer {
+                        Trailer::Call(c) => Expression::Call(
+                            Box::new(expr?),
+                            c.into_iter().map(convert_expr).collect::<Result<_>>()?
+                        ),
+                        Trailer::Index(i) => Expression::Index (
+                            Box::new(expr?),
+                            Box::new(convert_expr(*i)?),
+                        ),
+                        Trailer::Attr(name) => Expression::Attr (
+                            Box::new(expr?),
+                            name,
+                        ),
+                        Trailer::TupleProject(index) => Expression::TupleProject (
+                            Box::new(expr?),
+                            index.parse()?,
+                        ),
+                    })
+                })?
+        }
     })
 }
 
@@ -178,19 +201,23 @@ fn convert_toplevels(toplevels: Vec<parser::TopLevel>) -> Result<(Vec<Statement>
                 expr: convert_expr(value)?,
             },
             TopLevel::Title(s) => Statement::Title(convert_slidestring(s)?),
-            TopLevel::Function(f) => Statement::Let {
-                name: f.name.clone(),
-                ty: None,
-                expr: Expression::Function(Function {
-                    name: Some(f.name),
-                    signature: convert_signature(f.signature)?,
-                    body: convert_function_body(f.body)?,
-                }),
-            },
+            TopLevel::Function(f) => convert_named_function(f)?,
         })
     }
 
     Ok((statements, types))
+}
+
+fn convert_named_function(f: NamedFunction) -> Result<Statement> {
+    Ok(Statement::Let {
+        name: f.name.clone(),
+        ty: None,
+        expr: Expression::Function(Function {
+            name: Some(f.name),
+            signature: convert_signature(f.signature)?,
+            body: convert_function_body(f.body)?,
+        }),
+    })
 }
 
 pub fn convert_field(field: parser::Field) -> Result<Field> {
@@ -218,9 +245,43 @@ pub fn convert_typedef(typedef: parser::TypeDef) -> Result<TypeDef> {
                 .collect::<Result<_>>()?,
             generics
         },
-        parser::TypeDef::Trait { .. } => todo!(),
-        parser::TypeDef::Impl { .. } => todo!(),
-        parser::TypeDef::TraitImpl { .. } => todo!(),
+        parser::TypeDef::Trait { name, items, generics } => {
+            let (stubs, items): (Vec<_>, Vec<_>) = items.into_iter()
+                .partition_map(|i| match i {
+                    TraitItem::Function(i) => Either::Right(i),
+                    TraitItem::FunctionStub(i) => Either::Left(i),
+                });
+
+            TypeDef::Trait {
+                name,
+                generics,
+                items: items.into_iter().map(convert_named_function).collect::<Result<_>>()?,
+                stubs: stubs.into_iter().map(convert_function_stub).collect::<Result<_>>()?,
+            }
+        },
+        parser::TypeDef::Impl { name, instantiated_generics, body } => TypeDef::Impl {
+            trait_name: None,
+            name: convert_type_name(name)?,
+            instantiated_generics,
+            body: body.into_iter().map(|i| Ok(match i {
+                ImplItem::Function(f) => convert_named_function(f)?
+            })).collect::<Result<_>>()?
+        },
+        parser::TypeDef::TraitImpl { name, trait_name, instantiated_generics, body } => TypeDef::Impl {
+            trait_name: Some(convert_type_name(trait_name)?),
+            name: convert_type_name(name)?,
+            instantiated_generics,
+            body: body.into_iter().map(|i| Ok(match i {
+                ImplItem::Function(f) => convert_named_function(f)?
+            })).collect::<Result<_>>()?
+        },
+    })
+}
+
+fn convert_function_stub(f: parser::FunctionStub) -> Result<FunctionStub> {
+    Ok(FunctionStub {
+        name: f.name,
+        signature: convert_signature(f.signature)?,
     })
 }
 
