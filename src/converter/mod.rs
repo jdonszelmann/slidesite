@@ -65,7 +65,7 @@ fn convert_function_stmt(s: parser::FunctionStatement) -> Result<Statement> {
     Ok(match s {
         FunctionStatement::Let(name, expr) => Statement::Let {
             name,
-            value: convert_expr(expr)?,
+            expr: convert_expr(expr)?,
         },
     })
 }
@@ -125,14 +125,18 @@ fn convert_toplevels(toplevels: Vec<parser::TopLevel>) -> Result<(Vec<Statement>
             },
             TopLevel::Theme(t) => Statement::Let {
                 name: t.name,
-                value: Expression::StructInstance {
+                expr: Expression::StructInstance {
                     name: "Theme".to_string(),
-                    assignments: vec![],
+                    assignments: t.assignments
+                        .into_iter()
+                        .map(|(name, expr)| Ok((name, convert_expr(expr)?)))
+                        .collect::<Result<_>>()?
+                    ,
                 },
             },
             TopLevel::Template(t) => Statement::Let {
                 name: t.name,
-                value: Expression::SlideBody(convert_body(t.body)?),
+                expr: Expression::SlideBody(convert_body(t.body)?),
             },
             TopLevel::TypeDef(t) => {
                 types.push(convert_typedef(t)?);
@@ -140,12 +144,12 @@ fn convert_toplevels(toplevels: Vec<parser::TopLevel>) -> Result<(Vec<Statement>
             }
             TopLevel::Let(name, value) => Statement::Let {
                 name,
-                value: convert_expr(value)?,
+                expr: convert_expr(value)?,
             },
             TopLevel::Title(s) => Statement::Title(convert_slidestring(s)?),
             TopLevel::Function(f) => Statement::Let {
                 name: f.name.clone(),
-                value: Expression::Function(Function {
+                expr: Expression::Function(Function {
                     name: Some(f.name),
                     signature: convert_signature(f.signature)?,
                     body: convert_function_body(f.body)?,

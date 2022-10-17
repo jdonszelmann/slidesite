@@ -82,7 +82,7 @@ pub enum Statement {
     },
     Let {
         name: String,
-        value: Expression,
+        expr: Expression,
     },
     Title(SlideString),
 }

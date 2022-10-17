@@ -407,7 +407,10 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
         .then(identifier.clone())
         .padded()
         .then(themebody)
-        .map(|((_, name), _)| Theme { name })
+        .map(|((_, name), body)| Theme {
+            name,
+            assignments: body
+        })
         .dy();
 
     let field = identifier

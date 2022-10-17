@@ -82,6 +82,7 @@ pub enum TypeDef {
 #[derive(Debug, Clone)]
 pub struct Theme {
     pub name: String,
+    pub assignments: Vec<(String, Expression)>,
 }
 
 #[derive(Debug, Clone)]

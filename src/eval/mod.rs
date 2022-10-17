@@ -203,7 +203,7 @@ impl Evaluator {
                         body: self.eval_body(body, scope)?,
                     });
                 }
-                Statement::Let { name, value } => {
+                Statement::Let { name, expr: value } => {
                     println!("{:?} {:?} {:?}", name, value, scope);
 
                     self.eval_let(name, value, scope)?
