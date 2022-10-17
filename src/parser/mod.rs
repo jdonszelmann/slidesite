@@ -1,8 +1,8 @@
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 use chumsky::error::Simple;
-use chumsky::prelude::{choice, empty, end, filter, just, recursive, take_until, Recursive, nested_delimiters};
+use chumsky::prelude::{choice, empty, end, filter, just, recursive, take_until, Recursive};
 use chumsky::text::TextParser;
-use chumsky::{text, Parser, recovery};
+use chumsky::{text, Parser};
 use std::io::{Cursor, Write};
 use std::rc::Rc;
 

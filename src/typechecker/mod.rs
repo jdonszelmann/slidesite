@@ -18,9 +18,9 @@ pub enum Type {
         type_params: Vec<TypeTerm>,
     },
     Function {
-        generics: Vec<Type>,
-        arguments: Vec<Type>,
-        return_type: Box<Type>,
+        generics: Vec<TypeTerm>,
+        arguments: Vec<TypeTerm>,
+        return_type: Box<TypeTerm>,
     },
 
     Template,

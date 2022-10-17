@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::rc::Rc;
 use crate::converter::{Program, Statement, Expression, Field, Function, SlideString, StringCharacter, TypeName};
 use crate::{typechecker, TypeError};
 use crate::typechecker::{Constraint, Type, TypeTerm, TypeVar};
@@ -60,7 +59,7 @@ impl<'src> ConstraintContext<'src> {
 
     fn convert_typename(&self, name: &TypeName) -> Result<Cow<TypeInfo>> {
         Ok(match name {
-            TypeName::Instantiation(name, args) => {
+            TypeName::Constructor(name, args) => {
                 let args: Vec<_> = args.into_iter()
                     .map(|i| self.convert_typename(i).map(|i| i.into_owned()))
                     .collect::<Result<_>>()?;
@@ -109,7 +108,12 @@ impl<'src> ConstraintContext<'src> {
                 scope.define(name, var);
                 let ty = self.expression(expr, scope)?;
 
-                self.equal(var, ty)
+                self.equal(var, ty);
+
+                if let Some(i) = expected_ty {
+                    let ty = self.convert_typename(i)?;
+                    self.equal(var, ty.type_definition()?.into_owned());
+                }
             }
             Statement::Title(s) => {
                 self.string(s, scope)?;
@@ -210,7 +214,7 @@ impl<'src> ConstraintContext<'src> {
 
                     body_scope.define(name, tv);
 
-                    argument_types.push(info.type_definition()?.into_owned())
+                    argument_types.push(info.type_definition()?.into_owned().into())
                 }
 
                 for c in constraints {
@@ -237,14 +241,31 @@ impl<'src> ConstraintContext<'src> {
                 Type::Function {
                     generics: vec![],
                     arguments: argument_types,
-                    return_type: Box::new(Type::Int),
+                    return_type: Box::new(Type::Int.into()),
                 }.into()
             }
             Expression::Sub(_, _) => todo!(),
             Expression::Mul(_, _) => todo!(),
             Expression::Div(_, _) => todo!(),
             Expression::Add(_, _) => todo!(),
-            Expression::Call(_, _) => todo!(),
+            Expression::Call(f, args) => {
+                let func_var = self.expression(f, scope)?;
+
+                let arg_vars = args.into_iter()
+                    .map(|i| self.expression(i, scope))
+                    .collect::<Result<Vec<_>>>()?;
+                let ret_var = self.new_type_var();
+
+                let func_type = Type::Function {
+                    generics: vec![],
+                    arguments: arg_vars,
+                    return_type: Box::new(ret_var.into())
+                };
+
+                self.equal(func_var, func_type);
+
+                ret_var.into()
+            },
             Expression::Index(_, _) => todo!(),
             Expression::Attr(_, _) => todo!(),
             Expression::TupleProject(_, _) => todo!(),

@@ -1,9 +1,6 @@
 use std::borrow::Cow;
-use std::cell::Cell;
 use std::collections::HashMap;
-use std::rc::Rc;
-use crate::converter::{Field, Program, TypeDef};
-use crate::parser::TypeName;
+use crate::converter::{Field, ImplItem, Program, TypeDef, TypeName, FunctionStub};
 use crate::typechecker::{Type, Result};
 use crate::TypeError;
 
@@ -19,6 +16,12 @@ pub enum TypeInfo<'src> {
     Tuple {
         nested_infos: Vec<TypeInfo<'src>>,
     },
+}
+
+struct TraitInfo<'src> {
+    fields: HashMap<String, ImplItem>,
+    stubs: &'src [FunctionStub],
+    generics: &'src [String],
 }
 
 impl<'src> TypeInfo<'src> {
@@ -41,35 +44,66 @@ impl<'src> TypeInfo<'src> {
     }
 }
 
+pub enum ImplementationRequirement {
+
+}
+
+pub struct ImplementationInfo<'src> {
+    creates_ty_vars: Vec<String>,
+    requirements: Vec<ImplementationRequirement>,
+    members: &'src [ImplItem],
+    trait_name: Option<&'src TypeName>,
+}
+
 pub struct TypeScope<'src> {
-    bindings: HashMap<String, TypeInfo<'src>>,
+    types: HashMap<String, TypeInfo<'src>>,
+    traits: HashMap<String, TraitInfo<'src>>,
+    impls: HashMap<&'src TypeName, Vec<ImplementationInfo<'src>>>,
 }
 
 impl<'src> TypeScope<'src> {
     fn declare(&mut self, name: &str, ty: TypeInfo<'src>) -> Result<()> {
-        if self.bindings.insert(name.to_string(), ty).is_some() {
+        if self.types.insert(name.to_string(), ty).is_some() {
             Err(TypeError::DuplicateDefinition(name.to_string()))
         } else {
             Ok(())
         }
     }
 
-    pub fn find(&self, name: &str, args: Vec<TypeInfo>) -> Result<&TypeInfo> {
-        self.bindings.get(name)
+    fn declare_trait(&mut self, name: &str, ty: TraitInfo<'src>) -> Result<()> {
+        if self.traits.insert(name.to_string(), ty).is_some() {
+            Err(TypeError::DuplicateDefinition(name.to_string()))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn add_impl(&mut self, name: &'src TypeName, imp: ImplementationInfo<'src>) -> Result<()> {
+        // TODO: check for overlapping impls here?
+        self.impls.entry(name).or_insert_with(Vec::new).push(imp);
+
+        Ok(())
+    }
+
+    pub fn find(&self, name: &str, _args: Vec<TypeInfo>) -> Result<&TypeInfo> {
+        // TODO: handle args?
+        self.types.get(name)
             .ok_or_else(|| TypeError::TypeDefinitionNotFound(name.to_string()))
     }
 
     pub fn new() -> Self {
         Self {
-            bindings: Default::default(),
+            types: Default::default(),
+            traits: Default::default(),
+            impls: Default::default(),
         }
     }
 }
 
-fn convert_typedef<'src>(def: &'src TypeDef, _scope: &mut TypeScope<'src>) -> (&'src str, TypeInfo<'src>) {
+fn convert_typedef<'src>(def: &'src TypeDef, scope: &mut TypeScope<'src>) -> Result<()> {
     match def {
         TypeDef::Enum { .. } => todo!(),
-        TypeDef::Struct { name, fields, generics } => (
+        TypeDef::Struct { name, fields, generics } => scope.declare(
             name,
             TypeInfo::Struct {
                 fields,
@@ -79,10 +113,25 @@ fn convert_typedef<'src>(def: &'src TypeDef, _scope: &mut TypeScope<'src>) -> (&
                 },
                 generics: generics.clone()
             }
-        ),
-        TypeDef::Trait { .. } => todo!(),
-        TypeDef::Impl { .. } => todo!(),
+        )?,
+        TypeDef::Trait { name, items, generics, stubs } => {
+            scope.declare_trait(name, TraitInfo {
+                generics,
+                fields: items.iter().map(|i| (i.name().to_string(), i.clone())).collect(),
+                stubs,
+            })?;
+        },
+        TypeDef::Impl { trait_name, name, instantiated_generics, body } => {
+            scope.add_impl(name, ImplementationInfo {
+                creates_ty_vars: instantiated_generics.clone(),
+                requirements: vec![],
+                members: body,
+                trait_name: trait_name.as_ref()
+            })?;
+        },
     }
+
+    Ok(())
 }
 
 pub fn find_types(program: &Program) -> Result<TypeScope> {
@@ -94,8 +143,7 @@ pub fn find_types(program: &Program) -> Result<TypeScope> {
 
 pub fn find_types_program<'src>(Program { types, .. }: &'src Program, scope: &mut TypeScope<'src>) -> Result<()> {
     for i in types {
-        let (name, ty) = convert_typedef(i, scope);
-        scope.declare(name, ty)?;
+        convert_typedef(i, scope)?;
     }
 
     Ok(())

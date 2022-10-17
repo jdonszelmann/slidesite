@@ -73,9 +73,9 @@ pub struct Theme {
     pub body: Vec<SlideStmt>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TypeName {
-    Instantiation(String, Vec<TypeName>),
+    Constructor(String, Vec<TypeName>),
     Tuple(Vec<TypeName>),
     Int,
     String,
@@ -84,8 +84,8 @@ pub enum TypeName {
 impl Display for TypeName {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            TypeName::Instantiation(i, args) if args.len() == 0 => write!(f, "{i}"),
-            TypeName::Instantiation(i, args) => {
+            TypeName::Constructor(i, args) if args.len() == 0 => write!(f, "{i}"),
+            TypeName::Constructor(i, args) => {
                 write!(f, "{i}<{}>", args.iter().map(ToString::to_string).join(","))
             },
             TypeName::Tuple(t) if t.len() == 1 => write!(f, "({},)", t[0]),
@@ -143,7 +143,7 @@ pub enum TypeDef {
     },
     Trait {
         name: String,
-        items: Vec<Statement>,
+        items: Vec<ImplItem>,
         generics: Vec<String>,
         stubs: Vec<FunctionStub>,
     },
@@ -151,8 +151,21 @@ pub enum TypeDef {
         trait_name: Option<TypeName>,
         name: TypeName,
         instantiated_generics: Vec<String>,
-        body: Vec<Statement>,
+        body: Vec<ImplItem>,
     },
+}
+
+#[derive(Debug, Clone)]
+pub enum ImplItem {
+    Function(Function)
+}
+
+impl ImplItem {
+    pub fn name(&self) -> &str {
+        match self {
+            ImplItem::Function(f) => f.name.as_ref().expect("all items in implement blocks must have a name"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
