@@ -1,4 +1,4 @@
-use crate::converter::Program;
+use crate::converter::{Program, TypeName};
 use thiserror::Error;
 use generate_constraints::ConstraintContext;
 use crate::typechecker::solve::Solver;
@@ -67,12 +67,15 @@ pub enum TypeError {
 
     #[error("in the instantiation of {struct_name} you did not assign a value to field {field}")]
     StructFieldNotAssigned {
-        struct_name: String,
+        struct_name: TypeName,
         field: String
     },
 
     #[error("use of variable {0} before definition")]
     NotYetDefined(String),
+
+    #[error("only structs or enums can be instantiated with generic type parameters")]
+    CantInstantiate,
 }
 
 pub type Result<T> = std::result::Result<T, TypeError>;

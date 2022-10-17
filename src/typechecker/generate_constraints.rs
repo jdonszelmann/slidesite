@@ -1,7 +1,8 @@
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use crate::converter::{Program, Statement, Expression, Field, Function, SlideString, StringCharacter};
+use crate::converter::{Program, Statement, Expression, Field, Function, SlideString, StringCharacter, TypeName};
 use crate::{typechecker, TypeError};
 use crate::typechecker::{Constraint, Type, TypeTerm, TypeVar};
 use crate::typechecker::find_types::{TypeInfo, TypeScope};
@@ -57,8 +58,24 @@ impl<'src> ConstraintContext<'src> {
         TypeVar(val)
     }
 
-    fn convert_typename(&self, name: &str) -> Result<Rc<TypeInfo>> {
-        self.scope.find(name)
+    fn convert_typename(&self, name: &TypeName) -> Result<Cow<TypeInfo>> {
+        Ok(match name {
+            TypeName::Instantiation(name, args) => {
+                let args: Vec<_> = args.into_iter()
+                    .map(|i| self.convert_typename(i).map(|i| i.into_owned()))
+                    .collect::<Result<_>>()?;
+                Cow::Borrowed(self.scope.find(name, args)?)
+            }
+            TypeName::Tuple(t) => Cow::Owned(TypeInfo::Tuple {
+                nested_infos: t.into_iter()
+                    .map(|i| {
+                        self.convert_typename(i).map(|i| i.into_owned())
+                    })
+                    .collect::<Result<_>>()?,
+            }),
+            TypeName::Int => Cow::Owned(TypeInfo::Int),
+            TypeName::String => Cow::Owned(TypeInfo::String),
+        })
     }
 
     fn add_constraint(&mut self, c: Constraint) {
@@ -87,7 +104,7 @@ impl<'src> ConstraintContext<'src> {
     pub fn statement(&mut self, stmt: &'src Statement, scope: &mut Scope<'src>) -> typechecker::Result<()> {
         match stmt {
             Statement::Slide { .. } => {}
-            Statement::Let { name, expr } => {
+            Statement::Let { name, ty: expected_ty, expr } => {
                 let var = self.new_type_var();
                 scope.define(name, var);
                 let ty = self.expression(expr, scope)?;
@@ -118,12 +135,12 @@ impl<'src> ConstraintContext<'src> {
                 let ty = scope.lookup(name)?;
 
                 ty.into()
-            },
+            }
             Expression::Number(_) => Type::Int.into(),
             Expression::String(s) => {
                 self.string(s.as_ref(), scope)?;
                 Type::String.into()
-            },
+            }
             Expression::SlideBody(_) => todo!(),
             Expression::Tuple(t) => {
                 Type::Tuple(
@@ -146,23 +163,26 @@ impl<'src> ConstraintContext<'src> {
 
 
                 let ty = self.convert_typename(struct_name)?;
-                if let TypeInfo::Struct { traits: _, fields, type_definition, .. } = ty.as_ref() {
+                if let TypeInfo::Struct { fields, type_definition, .. } = ty.as_ref() {
                     let mut constraints = Vec::new();
                     let result = type_definition.clone();
 
-                    for Field{ name: field_name, field_type, default } in *fields {
+                    for Field { name: field_name, field_type, default } in *fields {
                         if let Some(assigned_type) = types.get(field_name) {
                             let expected_type = self.convert_typename(field_type)?;
 
-                            constraints.push(self.create_equal(expected_type.type_definition().clone(), assigned_type.clone()));
+                            constraints.push(self.create_equal(
+                                expected_type.type_definition()?.into_owned(),
+                                assigned_type.clone(),
+                            ));
                         } else if default.is_some() {
                             // the default expression can be assigned and all is good
                         } else {
                             println!("{:?}", assignments);
                             return Err(TypeError::StructFieldNotAssigned {
-                                struct_name: struct_name.to_string(),
-                                field: field_name.to_string()
-                            })
+                                struct_name: struct_name.clone(),
+                                field: field_name.to_string(),
+                            });
                         }
                     }
 
@@ -174,8 +194,8 @@ impl<'src> ConstraintContext<'src> {
                 } else {
                     unimplemented!()
                 }
-            },
-            Expression::Function(Function{ signature, body, .. }) => {
+            }
+            Expression::Function(Function { signature, body, .. }) => {
                 let arguments = signature.params.iter()
                     .map(|(name, ty)| Ok((name, self.convert_typename(ty)?)))
                     .collect::<Result<Vec<_>>>()?;
@@ -186,11 +206,11 @@ impl<'src> ConstraintContext<'src> {
                 let mut body_scope = scope.child();
                 for (name, info) in arguments {
                     let tv = self.new_type_var();
-                    constraints.push(self.create_equal(tv, info.type_definition().clone()));
+                    constraints.push(self.create_equal(tv, info.type_definition()?.into_owned()));
 
                     body_scope.define(name, tv);
 
-                    argument_types.push(info.type_definition().clone())
+                    argument_types.push(info.type_definition()?.into_owned())
                 }
 
                 for c in constraints {
@@ -208,7 +228,7 @@ impl<'src> ConstraintContext<'src> {
 
                 let expected_ret_ty = signature.ret
                     .as_ref()
-                    .map(|t| Ok(self.convert_typename(t)?.type_definition().clone()))
+                    .map(|t| Ok(self.convert_typename(t)?.type_definition()?.into_owned()))
                     .transpose()?
                     .unwrap_or_else(|| Type::Tuple(vec![]).into());
 
@@ -217,9 +237,9 @@ impl<'src> ConstraintContext<'src> {
                 Type::Function {
                     generics: vec![],
                     arguments: argument_types,
-                    return_type: Box::new(Type::Int)
+                    return_type: Box::new(Type::Int),
                 }.into()
-            },
+            }
             Expression::Sub(_, _) => todo!(),
             Expression::Mul(_, _) => todo!(),
             Expression::Div(_, _) => todo!(),
