@@ -1,5 +1,5 @@
-use std::borrow::Cow;
-use std::cell::Cell;
+use std::borrow::BorrowMut;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use crate::converter::{Program, Statement, Expression, Field, Function, SlideString, StringCharacter, TypeName};
 use crate::{typechecker, TypeError};
@@ -8,8 +8,8 @@ use crate::typechecker::find_types::{TypeInfo, TypeScope};
 use crate::typechecker::Result;
 
 pub struct ConstraintContext<'src> {
-    pub constraints: Vec<Constraint>,
-    scope: TypeScope<'src>,
+    pub constraints: RefCell<Vec<Constraint>>,
+    pub scope: TypeScope<'src>,
     var_ctr: Cell<usize>,
 }
 
@@ -45,7 +45,7 @@ impl<'src> Scope<'src> {
 impl<'src> ConstraintContext<'src> {
     pub fn new(scope: TypeScope<'src>) -> Self {
         Self {
-            constraints: vec![],
+            constraints: Default::default(),
             scope,
             var_ctr: Cell::new(0),
         }
@@ -57,35 +57,69 @@ impl<'src> ConstraintContext<'src> {
         TypeVar(val)
     }
 
-    fn convert_typename(&self, name: &TypeName) -> Result<Cow<TypeInfo>> {
-        Ok(match name {
-            TypeName::Constructor(name, args) => {
-                let args: Vec<_> = args.into_iter()
-                    .map(|i| self.convert_typename(i).map(|i| i.into_owned()))
-                    .collect::<Result<_>>()?;
-                Cow::Borrowed(self.scope.find(name, args)?)
+    fn new_type_var_for(&self, var: impl Into<TypeTerm>) -> TypeVar {
+        match var.into() {
+            TypeTerm::Variable(v) => v,
+            o => {
+                let var = self.new_type_var();
+                self.equal(var, o);
+
+                var
             }
-            TypeName::Tuple(t) => Cow::Owned(TypeInfo::Tuple {
-                nested_infos: t.into_iter()
-                    .map(|i| {
-                        self.convert_typename(i).map(|i| i.into_owned())
-                    })
-                    .collect::<Result<_>>()?,
-            }),
-            TypeName::Int => Cow::Owned(TypeInfo::Int),
-            TypeName::String => Cow::Owned(TypeInfo::String),
+        }
+    }
+
+    pub fn type_definition(&self, info: TypeInfo) -> Result<Type> {
+        Ok(match info {
+            TypeInfo::Struct { type_definition, .. } => type_definition,
+            TypeInfo::Int => Type::Int,
+            TypeInfo::String => Type::String,
+            TypeInfo::Tuple { nested_infos } => {
+                Type::Tuple(
+                    nested_infos
+                        .iter()
+                        .map(|i| {
+                            let ty = self.type_definition(i.clone())?;
+                            let var = self.new_type_var();
+                            self.equal(var, ty);
+
+                            Ok(var)
+                        })
+                        .collect::<Result<_>>()?
+                )
+            }
         })
     }
 
-    fn add_constraint(&mut self, c: Constraint) {
-        self.constraints.push(c)
+    fn convert_typename(&self, name: &TypeName) -> Result<TypeInfo> {
+        Ok(match name {
+            TypeName::Constructor(name, args) => {
+                let args: Vec<_> = args.into_iter()
+                    .map(|i| self.convert_typename(i).map(|i| i))
+                    .collect::<Result<_>>()?;
+                self.scope.find(name, args)?.clone()
+            }
+            TypeName::Tuple(t) => TypeInfo::Tuple {
+                nested_infos: t.into_iter()
+                    .map(|i| {
+                        self.convert_typename(i)
+                    })
+                    .collect::<Result<_>>()?,
+            },
+            TypeName::Int => TypeInfo::Int,
+            TypeName::String => TypeInfo::String,
+        })
     }
 
-    fn create_equal(&self, a: impl Into<TypeTerm>, b: impl Into<TypeTerm>) -> Constraint {
-        Constraint::Equal(a.into(), b.into())
+    fn add_constraint(&self, c: Constraint) {
+        self.constraints.borrow_mut().push(c)
     }
 
-    fn equal(&mut self, a: impl Into<TypeTerm>, b: impl Into<TypeTerm>) {
+    fn create_equal(&self, a: TypeVar, b: impl Into<TypeTerm>) -> Constraint {
+        Constraint::Equal(a, b.into())
+    }
+
+    fn equal(&self, a: TypeVar, b: impl Into<TypeTerm>) {
         self.add_constraint(self.create_equal(a, b))
     }
 
@@ -112,7 +146,8 @@ impl<'src> ConstraintContext<'src> {
 
                 if let Some(i) = expected_ty {
                     let ty = self.convert_typename(i)?;
-                    self.equal(var, ty.type_definition()?.into_owned());
+                    let ty = self.type_definition(ty.clone())?;
+                    self.equal(var, ty);
                 }
             }
             Statement::Title(s) => {
@@ -152,7 +187,7 @@ impl<'src> ConstraintContext<'src> {
                         .map(|e| {
                             let ty = self.expression(e, scope)?;
                             let var = self.new_type_var();
-                            self.equal(ty, var);
+                            self.equal(var, ty);
 
                             Ok(var.into())
                         })
@@ -167,7 +202,7 @@ impl<'src> ConstraintContext<'src> {
 
 
                 let ty = self.convert_typename(struct_name)?;
-                if let TypeInfo::Struct { fields, type_definition, .. } = ty.as_ref() {
+                if let TypeInfo::Struct { fields, type_definition, .. } = &ty {
                     let mut constraints = Vec::new();
                     let result = type_definition.clone();
 
@@ -175,9 +210,11 @@ impl<'src> ConstraintContext<'src> {
                         if let Some(assigned_type) = types.get(field_name) {
                             let expected_type = self.convert_typename(field_type)?;
 
+                            let var = self.new_type_var_for(assigned_type.clone());
+
                             constraints.push(self.create_equal(
-                                expected_type.type_definition()?.into_owned(),
-                                assigned_type.clone(),
+                                var,
+                                self.type_definition(expected_type.clone())?.clone(),
                             ));
                         } else if default.is_some() {
                             // the default expression can be assigned and all is good
@@ -199,7 +236,7 @@ impl<'src> ConstraintContext<'src> {
                     unimplemented!()
                 }
             }
-            Expression::Function(Function { signature, body, .. }) => {
+            Expression::Function(Function { signature, body, name }) => {
                 let arguments = signature.params.iter()
                     .map(|(name, ty)| Ok((name, self.convert_typename(ty)?)))
                     .collect::<Result<Vec<_>>>()?;
@@ -210,11 +247,12 @@ impl<'src> ConstraintContext<'src> {
                 let mut body_scope = scope.child();
                 for (name, info) in arguments {
                     let tv = self.new_type_var();
-                    constraints.push(self.create_equal(tv, info.type_definition()?.into_owned()));
+                    constraints.push(self.create_equal(tv, self.type_definition(info.clone())?.clone()));
 
                     body_scope.define(name, tv);
 
-                    argument_types.push(info.type_definition()?.into_owned().into())
+                    let ty = self.type_definition(info.clone())?;
+                    argument_types.push(self.new_type_var_for(ty.clone()));
                 }
 
                 for c in constraints {
@@ -232,16 +270,18 @@ impl<'src> ConstraintContext<'src> {
 
                 let expected_ret_ty = signature.ret
                     .as_ref()
-                    .map(|t| Ok(self.convert_typename(t)?.type_definition()?.into_owned()))
+                    .map(|t| Ok(self.type_definition(self.convert_typename(t)?.clone())?.clone()))
                     .transpose()?
                     .unwrap_or_else(|| Type::Tuple(vec![]).into());
 
-                self.equal(ret_ty, expected_ret_ty);
+                let var = self.new_type_var_for(ret_ty);
+                self.equal(var, expected_ret_ty);
 
                 Type::Function {
+                    name: name.clone().unwrap_or("<anonymous function>".to_string()),
                     generics: vec![],
                     arguments: argument_types,
-                    return_type: Box::new(Type::Int.into()),
+                    return_type: self.new_type_var_for(Type::Int),
                 }.into()
             }
             Expression::Sub(_, _) => todo!(),
@@ -252,22 +292,32 @@ impl<'src> ConstraintContext<'src> {
                 let func_var = self.expression(f, scope)?;
 
                 let arg_vars = args.into_iter()
-                    .map(|i| self.expression(i, scope))
+                    .map(|i| {
+                        let ty = self.expression(i, scope)?;
+                        Ok(self.new_type_var_for(ty))
+                    })
                     .collect::<Result<Vec<_>>>()?;
                 let ret_var = self.new_type_var();
 
                 let func_type = Type::Function {
+                    name: "<unknown>".to_string(),
                     generics: vec![],
                     arguments: arg_vars,
-                    return_type: Box::new(ret_var.into())
+                    return_type: ret_var
                 };
 
-                self.equal(func_var, func_type);
+                let var = self.new_type_var_for(func_var);
+                self.equal(var, func_type);
 
                 ret_var.into()
             },
             Expression::Index(_, _) => todo!(),
-            Expression::Attr(_, _) => todo!(),
+            Expression::Attr(e, v) => {
+                let et = self.expression(e, scope)?;
+                let var = self.new_type_var_for(et);
+
+                TypeTerm::FieldAccess(var, v.to_string())
+            },
             Expression::TupleProject(_, _) => todo!(),
         })
     }

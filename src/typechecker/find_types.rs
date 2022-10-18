@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use crate::converter::{Field, ImplItem, Program, TypeDef, TypeName, FunctionStub};
-use crate::typechecker::{Type, Result};
+use crate::typechecker::{Type, Result, TypeVar};
+use crate::typechecker::solve::ResolvedType;
 use crate::TypeError;
 
 #[derive(Clone)]
@@ -24,30 +25,12 @@ struct TraitInfo<'src> {
     generics: &'src [String],
 }
 
-impl<'src> TypeInfo<'src> {
-    pub fn type_definition(&self) -> Result<Cow<Type>> {
-        Ok(match self {
-            TypeInfo::Struct { type_definition, .. } => Cow::Borrowed(type_definition),
-            TypeInfo::Int => Cow::Owned(Type::Int),
-            TypeInfo::String => Cow::Owned(Type::String),
-            TypeInfo::Tuple { nested_infos } => {
-                Cow::Owned(Type::Tuple(
-                    nested_infos
-                        .iter()
-                        .map(|i| {
-                            Ok(i.type_definition()?.into_owned().into())
-                        })
-                        .collect::<Result<_>>()?
-                ))
-            }
-        })
-    }
-}
-
+#[derive(Debug)]
 pub enum ImplementationRequirement {
 
 }
 
+#[derive(Debug)]
 pub struct ImplementationInfo<'src> {
     creates_ty_vars: Vec<String>,
     requirements: Vec<ImplementationRequirement>,
@@ -89,6 +72,39 @@ impl<'src> TypeScope<'src> {
         // TODO: handle args?
         self.types.get(name)
             .ok_or_else(|| TypeError::TypeDefinitionNotFound(name.to_string()))
+    }
+
+    fn match_name(&self, ty: &TypeName, match_with: &ResolvedType) -> bool {
+        match (&ty, match_with) {
+            (TypeName::String, ResolvedType::String) => true,
+            (TypeName::Int, ResolvedType::Int) => true,
+            (TypeName::Tuple(v), ResolvedType::Tuple(r)) => {
+                v.iter().zip(r).all(|(i, t)| {
+                    self.match_name(i, t)
+                })
+            },
+            (TypeName::Constructor(cname, ctype_params), ResolvedType::Struct { name: rname, type_params: rtype_params }) => {
+                cname == rname && ctype_params.iter().zip(rtype_params).all(|(i, t)| {
+                    self.match_name(i, t)
+                })
+            }
+            (_, ResolvedType::Function { .. }) => { todo!() }
+            _ => false
+        }
+    }
+
+    pub fn access_field(&self, ty: ResolvedType, field: String) -> Result<Type> {
+        let mut candidates = Vec::new();
+
+        for (name, info) in &self.impls {
+            if self.match_name(name, &ty) {
+                candidates.push(info)
+            }
+        }
+
+        println!("{:?}", candidates);
+
+        todo!()
     }
 
     pub fn new() -> Self {

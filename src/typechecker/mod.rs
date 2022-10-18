@@ -1,45 +1,50 @@
+use std::fmt::{Display, Formatter};
+use itertools::Itertools;
 use crate::converter::{Program, TypeName};
 use thiserror::Error;
+use typed_arena::Arena;
 use generate_constraints::ConstraintContext;
-use crate::typechecker::solve::Solver;
+use crate::typechecker::solve::{ResolvedType, Solver};
+use derivative::Derivative;
 
 mod find_types;
 mod generate_constraints;
 mod solve;
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Derivative)]
+#[derivative(Hash, PartialEq)]
 pub enum Type {
     Int,
     String,
-    Tuple(Vec<TypeTerm>),
+    Tuple(Vec<TypeVar>),
     Struct{
         name: String,
-        type_params: Vec<TypeTerm>,
+        type_params: Vec<TypeVar>,
     },
     Function {
-        generics: Vec<TypeTerm>,
-        arguments: Vec<TypeTerm>,
-        return_type: Box<TypeTerm>,
+        #[derivative(Hash="ignore")]
+        #[derivative(PartialEq="ignore")]
+        name: String,
+        generics: Vec<TypeVar>,
+        arguments: Vec<TypeVar>,
+        return_type: TypeVar,
     },
-
-    Template,
-    ListItem,
-    EnumItem,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub struct TypeVar(usize);
 
 #[derive(Clone, Debug)]
 pub enum TypeTerm {
-    Constructor { name: Type, generics: Vec<TypeTerm> },
+    Type(Type),
     Variable(TypeVar),
+    FieldAccess(TypeVar, String),
 }
 
 impl From<Type> for TypeTerm {
     fn from(t: Type) -> Self {
-        Self::Constructor {name: t, generics: vec![]}
+        Self::Type(t)
     }
 }
 
@@ -49,9 +54,9 @@ impl From<TypeVar> for TypeTerm {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Constraint {
-    Equal(TypeTerm, TypeTerm),
+    Equal(TypeVar, TypeTerm),
 }
 
 #[derive(Error, Debug)]
@@ -76,6 +81,9 @@ pub enum TypeError {
 
     #[error("only structs or enums can be instantiated with generic type parameters")]
     CantInstantiate,
+
+    #[error("trying to access {0}.{1} but {0} has no such field")]
+    NoSuchField(ResolvedType, String)
 }
 
 pub type Result<T> = std::result::Result<T, TypeError>;
@@ -86,7 +94,8 @@ pub fn typecheck(ast: &Program) -> Result<()> {
     let mut constraints = ConstraintContext::new(types);
     constraints.generate_constraints(ast)?;
 
-    Solver::new(constraints).solve()?;
+    let arena = Arena::new();
+    Solver::new(constraints, &arena).solve()?;
 
     Ok(())
 }
