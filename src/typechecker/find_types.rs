@@ -44,35 +44,35 @@ impl<'src> TypeScope<'src> {
     }
 }
 
-fn convert_typedef<'src>(def: &'src TypeDef, _scope: &mut TypeScope<'src>) -> (&'src str, TypeInfo<'src>) {
-    match def {
-        TypeDef::Enum { .. } => todo!(),
-        TypeDef::Struct { name, fields } => (
-            name,
-            TypeInfo::Struct {
-                traits: vec![],
-                fields,
-                type_definition: Type::Struct {
-                    name: name.to_string(),
-                    type_params: vec![],
-                },
-            }
-        ),
-    }
-}
+// fn convert_typedef<'src>(def: &'src TypeDef, _scope: &mut TypeScope<'src>) -> (&'src str, TypeInfo<'src>) {
+//     match def {
+//         TypeDef::Enum { .. } => todo!(),
+//         TypeDef::Struct { name, fields } => (
+//             name,
+//             TypeInfo::Struct {
+//                 traits: vec![],
+//                 fields,
+//                 type_definition: Type::Struct {
+//                     name: name.to_string(),
+//                     type_params: vec![],
+//                 },
+//             }
+//         ),
+//     }
+// }
 
-pub fn find_types(program: &Program) -> Result<TypeScope> {
-    let mut scope = TypeScope::new();
-    find_types_program(program, &mut scope)?;
+// pub fn find_types(program: &Program) -> Result<TypeScope> {
+//     let mut scope = TypeScope::new();
+//     find_types_program(program, &mut scope)?;
+//
+//     Ok(scope)
+// }
 
-    Ok(scope)
-}
-
-pub fn find_types_program<'src>(Program { types, .. }: &'src Program, scope: &mut TypeScope<'src>) -> Result<()> {
-    for i in types {
-        let (name, ty) = convert_typedef(i, scope);
-        scope.declare(name, ty)?;
-    }
-
-    Ok(())
-}
+// pub fn find_types_program<'src>(Program { types, .. }: &'src Program, scope: &mut TypeScope<'src>) -> Result<()> {
+//     for i in types {
+//         let (name, ty) = convert_typedef(i, scope);
+//         scope.declare(name, ty)?;
+//     }
+//
+//     Ok(())
+// }

@@ -7,17 +7,18 @@ use std::io::{Cursor, Write};
 use std::rc::Rc;
 
 mod ast;
+
 pub use ast::*;
 
 trait Dy<A, B, C> {
-    fn dy(self) -> Rc<dyn Parser<A, B, Error = C>>;
+    fn dy(self) -> Rc<dyn Parser<A, B, Error=C>>;
 }
 
 impl<A: Clone, B, C, T> Dy<A, B, C> for T
-where
-    T: Parser<A, B, Error = C> + 'static,
+    where
+        T: Parser<A, B, Error=C> + 'static,
 {
-    fn dy(self) -> Rc<dyn Parser<A, B, Error = C>> {
+    fn dy(self) -> Rc<dyn Parser<A, B, Error=C>> {
         Rc::new(self)
     }
 }
@@ -26,7 +27,7 @@ fn char_to_string(c: char) -> StringCharacter {
     StringCharacter::Char(c)
 }
 
-fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
+fn parser() -> impl Parser<char, Program, Error=Simple<char>> {
     let comment = just("//").then(take_until(just('\n'))).padded().dy();
     let op = |c| just(c).padded();
 
@@ -38,24 +39,83 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
     let number = text::int(10).dy();
     let identifier = text::ident().dy();
 
+    // TODO: actually support bounds
+    let bounded_generics = identifier.clone()
+        .padded()
+        .separated_by(just(','))
+        .allow_trailing()
+        .padded()
+        .delimited_by(just('<'), just('>'))
+        .dy();
+
+    let mut type_name = Recursive::<_, _, Simple<char>>::declare();
+
+    let type_argument_list = type_name.clone()
+        .padded()
+        .separated_by(just(','))
+        .allow_trailing()
+        .padded()
+        .delimited_by(just('<'), just('>'))
+        .dy();
+
+    let type_instantiation = identifier.clone()
+        .padded()
+        .then(type_argument_list.or_not())
+        .map(|(name, args)| TypeName::Instantiation(name, args.unwrap_or(vec![])));
+
+    type_name.define(recursive(|type_name| {
+        choice((
+            type_instantiation,
+            type_name
+                .padded()
+                .separated_by(just(','))
+                .allow_trailing()
+                .padded()
+                .delimited_by(just('('), just(')'))
+                .map(TypeName::Tuple),
+        ))
+            .padded()
+            .dy()
+    }).dy());
+
     let identifier_or_number = choice((
         number.clone().map(IdentifierOrNumber::Number),
         identifier.clone().map(IdentifierOrNumber::Identifier),
     ))
-    .dy();
+        .dy();
 
     let mut expression = Recursive::<_, _, Simple<char>>::declare();
 
-    let statement_terminator = choice((just(';').to(()), just('\n').to(()), end())).dy();
+    let statement_terminator = choice((
+        just(';').to(()),
+        // just('\n').to(()),
+        end()
+    ))
+        .dy();
+
+    let untyped_assignment = identifier
+        .clone()
+        .padded()
+        .then_ignore(op('='))
+        .padded()
+        .then(expression.clone())
+        .padded()
+        .dy();
 
     let assignment = identifier
         .clone()
         .padded()
+        .then(
+            op(':')
+                .ignore_then(type_name.clone().padded())
+                .padded()
+                .or_not()
+        )
         .then_ignore(op('='))
         .then(expression.clone())
         .dy();
 
-    let assignment_comma_seq = assignment
+    let assignment_comma_seq = untyped_assignment
         .clone()
         .padded()
         .padded_by(comment.clone().repeated())
@@ -64,7 +124,7 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
         .padded()
         .dy();
 
-    let assignment_seq = assignment
+    let assignment_seq = untyped_assignment
         .clone()
         .padded()
         .padded_by(comment.clone().repeated())
@@ -73,7 +133,9 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
         .padded()
         .dy();
 
-    let let_assignment = text::keyword("let").ignore_then(assignment.clone()).dy();
+    let let_assignment = text::keyword("let")
+        .ignore_then(assignment.clone())
+        .dy();
 
     let interpolation = expression
         .clone()
@@ -89,7 +151,7 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
         just("\\}").to(StringCharacter::Char('}')),
         interpolation.map(StringCharacter::Expr),
     ))
-    .dy();
+        .dy();
 
     let single_quote_string_char =
         choice((escape.clone(), filter(|c| *c != '\'').map(char_to_string))).dy();
@@ -148,21 +210,32 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
                 .delimited_by(just('{'), just('}')),
         )
         .map(|(name, assignments)| Atom::Struct(name, assignments))
+        // .recover_with(nested_delimiters(
+        //     '{',
+        //     '}',
+        //     [
+        //         ('(', ')'),
+        //         ('{', '}'),
+        //         ('[', ']'),
+        //     ],
+        //     |_span| Atom::Error,
+        // ))
         .dy();
 
     let mut function_expr = Recursive::<_, _, Simple<char>>::declare();
 
     let atom = choice((
         struct_instantiation,
-        number.map(Atom::Number),
+        number.clone().map(Atom::Number),
         identifier.clone().map(Atom::Identifier),
         string.clone().map(|i| Atom::String(Box::new(i))),
         tuple,
         function_expr.clone().map(Atom::Function),
     ))
-    .dy();
+        .dy();
 
-    let atom_expr = choice((
+
+    let bare_atom_expr = choice((
         atom.map(Expression::Atom),
         expression
             .clone()
@@ -170,7 +243,47 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
             .delimited_by(just('('), just(')'))
             .padded(),
     ))
-    .dy();
+        .dy();
+
+    let call = expression
+        .clone()
+        .padded()
+        .separated_by(just(','))
+        .padded()
+        .delimited_by(just('('), just(')'))
+        .map(|params| Trailer::Call(params))
+        .dy();
+
+    let index = expression
+        .clone()
+        .padded()
+        .delimited_by(just('('), just(')'))
+        .map(|index| Trailer::Index(Box::new(index)))
+        .dy();
+
+    let attr = op('.')
+        .ignore_then(identifier.clone())
+        .map(|attr| Trailer::Attr(attr))
+        .dy();
+
+    let tuple_proj = op('.')
+        .ignore_then(number.clone())
+        .padded()
+        .map(|attr| Trailer::TupleProject(attr))
+        .dy();
+
+    let trailer = choice((call, index, attr, tuple_proj))
+        .repeated();
+
+    let atom_expr = bare_atom_expr
+        .then(trailer)
+        .map(|(base, trailer)| {
+            if trailer.len() > 0 {
+                Expression::Trailer(Box::new(base), trailer)
+            } else {
+                base
+            }
+        });
 
     let unary = op('-')
         .repeated()
@@ -257,7 +370,7 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
                         insert,
                         let_assignment
                             .clone()
-                            .map(|(name, expr)| SlideStmt::Let(name, expr)),
+                            .map(|((name, ty), expr)| SlideStmt::Let(name, ty, expr)),
                     ));
 
                     let stmt = choice((
@@ -272,7 +385,7 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
                             .then_ignore(statement_terminator.clone().repeated().exactly(repeat))
                             .padded(),
                     ))
-                    .padded();
+                        .padded();
 
                     let marked = identifier
                         .clone()
@@ -285,7 +398,7 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
                     choice((marked, stmt))
                 })
             }
-            .dy()
+                .dy()
         };
 
         let main_seq = slidestmt(true)
@@ -312,18 +425,23 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
     });
 
     let function_stmt = choice((let_assignment
-        .clone()
-        .map(|(name, expr)| FunctionStatement::Let(name, expr)),))
-    .padded_by(comment.clone().repeated())
-    .then_ignore(
-        filter(|i: &char| char::is_whitespace(*i) && *i != '\n')
-            .repeated()
-            .or_not(),
-    );
+                                    .clone()
+                                    .map(|((name, ty), expr)| FunctionStatement::Let(name, ty, expr)), ))
+        .padded_by(comment.clone().repeated())
+        .then_ignore(
+            filter(|i: &char| char::is_whitespace(*i) && *i != '\n')
+                .repeated()
+                .or_not(),
+        );
 
     let function_stmt_seq = function_stmt
+        .padded()
+        .padded_by(comment.clone().repeated())
         .separated_by(statement_terminator.clone())
-        .then(expression.clone().or_not())
+        .allow_trailing()
+        .padded()
+        .then(expression.clone().padded().or_not())
+        .padded()
         .dy();
 
     let function_body = function_stmt_seq
@@ -340,21 +458,22 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
         .padded()
         .then_ignore(op(':'))
         .padded()
-        .then(identifier.clone())
+        .then(type_name.clone())
         .padded()
         .dy();
     let paramlist = param
         .separated_by(op(',').padded())
         .delimited_by(just('('), just(')'));
-    let return_type = just("->").padded().ignore_then(identifier.clone());
+    let return_type = just("->").padded().ignore_then(type_name.clone());
 
     let signature = paramlist
         .padded()
         .then(return_type.or_not().padded())
+        .padded()
         .map(|(params, ret)| FunctionSignature { params, ret })
         .dy();
 
-    let function_common_part = signature.then(function_body).dy();
+    let function_common_part = signature.clone().then(function_body).dy();
 
     function_expr.define(
         text::keyword("fn")
@@ -371,6 +490,19 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
         .map(|(name, (signature, body))| NamedFunction {
             name,
             body,
+            signature,
+        })
+        .dy();
+
+    let function_stub = text::keyword("fn")
+        .padded()
+        .ignore_then(identifier.clone())
+        .padded()
+        .then(signature)
+        .padded()
+        .then_ignore(statement_terminator.clone())
+        .map(|(name, signature)| FunctionStub {
+            name,
             signature,
         })
         .dy();
@@ -409,7 +541,7 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
         .then(themebody)
         .map(|((_, name), body)| Theme {
             name,
-            assignments: body
+            assignments: body,
         })
         .dy();
 
@@ -418,7 +550,7 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
         .padded()
         .then_ignore(just(':'))
         .padded()
-        .then(identifier.clone())
+        .then(type_name.clone())
         .padded()
         .then(just('=').padded().ignore_then(expression).or_not())
         .map(|((name, ty), expr)| Field {
@@ -441,8 +573,10 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
     let named_struct_body = identifier
         .clone()
         .padded()
+        .then(bounded_generics.clone().or_not())
+        .padded()
         .then(structbody)
-        .map(|(name, fields)| TypeDef::Struct { name, fields })
+        .map(|((name, generics), fields)| TypeDef::Struct { name, fields, generics: generics.unwrap_or(vec![]) })
         .dy();
 
     let enumdef = text::keyword("enum")
@@ -469,7 +603,87 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
         .ignore_then(named_struct_body)
         .dy();
 
-    let typedef = choice((structdef, enumdef)).dy();
+    let traititem = choice((
+        function_stmt.clone().map(TraitItem::Function),
+        function_stub.clone().map(TraitItem::FunctionStub),
+    ));
+
+    let traitbody = traititem
+        .padded()
+        .repeated()
+        .padded()
+        .padded_by(comment.clone().repeated())
+        .delimited_by(just('{'), just('}'))
+        .padded()
+        .dy();
+
+    let trait_def = text::keyword("trait")
+        .padded()
+        .ignore_then(identifier.clone())
+        .padded()
+        .then(bounded_generics.clone())
+        .padded()
+        .then(traitbody)
+        .map(|((name, generics), items)| TypeDef::Trait {
+            name,
+            items,
+            generics,
+        })
+        .dy();
+
+
+    let implitem = choice((
+        function_stmt.clone().map(ImplItem::Function),
+    ));
+
+    let implbody = implitem
+        .padded()
+        .repeated()
+        .padded()
+        .padded_by(comment.clone().repeated())
+        .delimited_by(just('{'), just('}'))
+        .padded()
+        .dy();
+
+    let trait_impl = text::keyword("impl")
+        .padded()
+        .ignore_then(bounded_generics.clone().or_not())
+        .padded()
+        .then(type_name.clone())
+        .padded()
+        .then_ignore(text::keyword("for"))
+        .padded()
+        .then(type_name.clone())
+        .padded()
+        .then(implbody.clone())
+        .map(|(((generics, trait_name), type_name), body)| TypeDef::TraitImpl {
+            name: type_name,
+            body,
+            instantiated_generics: generics.unwrap_or(vec![]),
+            trait_name,
+        })
+        .dy();
+    let struct_impl = text::keyword("impl")
+        .padded()
+        .ignore_then(bounded_generics.clone().or_not())
+        .padded()
+        .then(type_name.clone())
+        .padded()
+        .then(implbody.clone())
+        .map(|((generics, name), body)| TypeDef::Impl {
+            name,
+            body,
+            instantiated_generics: generics.unwrap_or(vec![]),
+        })
+        .dy();
+
+    let implementation = choice((
+        trait_impl,
+        struct_impl,
+    )).dy();
+
+
+    let typedef = choice((structdef, enumdef, trait_def, implementation)).dy();
 
     let title = text::keyword("title").padded().ignore_then(name).dy();
 
@@ -481,13 +695,13 @@ fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
         let_assignment
             .clone()
             .then_ignore(statement_terminator)
-            .map(|(name, expr)| TopLevel::Let(name, expr)),
+            .map(|((name, ty), expr)| TopLevel::Let(name, ty, expr)),
         title.map(TopLevel::Title),
-        function_stmt.map(TopLevel::Function),
+        function_stmt.clone().map(TopLevel::Function),
     ))
-    .padded_by(comment.clone().repeated())
-    .padded()
-    .dy();
+        .padded_by(comment.clone().repeated())
+        .padded()
+        .dy();
 
     toplevel
         .repeated()

@@ -136,6 +136,9 @@ impl Evaluator {
             Expression::Div(_, _) => todo!(),
             Expression::Add(_, _) => todo!(),
             Expression::Call(_, _) => todo!(),
+            Expression::Index(_, _) => todo!(),
+            Expression::Attr(_, _) => todo!(),
+            Expression::TupleProject(_, _) => todo!(),
             Expression::StructInstance {
                 name: _,
                 assignments,
@@ -203,7 +206,7 @@ impl Evaluator {
                         body: self.eval_body(body, scope)?,
                     });
                 }
-                Statement::Let { name, expr: value } => {
+                Statement::Let { name, expr: value , ..} => {
                     println!("{:?} {:?} {:?}", name, value, scope);
 
                     self.eval_let(name, value, scope)?
@@ -262,7 +265,7 @@ impl Evaluator {
                 ),
             ),
             converter::SlideStmt::Insert(i) => SlideStmt::Insert(i),
-            converter::SlideStmt::Let(name, value) => {
+            converter::SlideStmt::Let(name, _, value) => {
                 self.eval_let(name, value, scope)?;
                 return Ok(None);
             }

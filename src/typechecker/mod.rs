@@ -1,7 +1,7 @@
 use crate::converter::Program;
 use thiserror::Error;
-use generate_constraints::ConstraintContext;
-use crate::typechecker::solve::Solver;
+// use generate_constraints::ConstraintContext;
+// use crate::typechecker::solve::Solver;
 
 mod find_types;
 mod generate_constraints;
@@ -78,12 +78,12 @@ pub enum TypeError {
 pub type Result<T> = std::result::Result<T, TypeError>;
 
 pub fn typecheck(ast: &Program) -> Result<()> {
-    let types = find_types::find_types(ast)?;
-
-    let mut constraints = ConstraintContext::new(types);
-    constraints.generate_constraints(ast)?;
-
-    Solver::new(constraints).solve()?;
+    // let types = find_types::find_types(ast)?;
+    //
+    // let mut constraints = ConstraintContext::new(types);
+    // constraints.generate_constraints(ast)?;
+    //
+    // Solver::new(constraints).solve()?;
 
     Ok(())
 }
