@@ -1,3 +1,6 @@
+use std::fmt::{Display, Formatter};
+use itertools::Itertools;
+
 #[derive(Debug, Clone)]
 pub struct FunctionBody {
     pub stmts: Vec<Statement>,
@@ -6,8 +9,8 @@ pub struct FunctionBody {
 
 #[derive(Debug, Clone)]
 pub struct FunctionSignature {
-    pub params: Vec<(String, String)>,
-    pub ret: Option<String>,
+    pub params: Vec<(String, TypeName)>,
+    pub ret: Option<TypeName>,
 }
 
 #[derive(Debug, Clone)]
@@ -25,7 +28,7 @@ pub enum Expression {
     SlideBody(Vec<SlideStmt>),
     Tuple(Vec<Expression>),
     StructInstance {
-        name: String,
+        name: TypeName,
         assignments: Vec<(String, Expression)>,
     },
     Function(Function),
@@ -35,6 +38,9 @@ pub enum Expression {
     Div(Box<Expression>, Box<Expression>),
     Add(Box<Expression>, Box<Expression>),
     Call(Box<Expression>, Vec<Expression>),
+    Index(Box<Expression>, Box<Expression>),
+    Attr(Box<Expression>, String),
+    TupleProject(Box<Expression>, u64),
 }
 
 #[derive(Debug, Clone)]
@@ -55,7 +61,7 @@ pub enum SlideStmt {
     EnumItem(Box<Expression>, Box<SlideStmt>),
     Marked(String, Box<SlideStmt>),
     Insert(String),
-    Let(String, Expression),
+    Let(String, Option<TypeName>, Expression),
 }
 
 #[derive(Debug)]
@@ -65,6 +71,29 @@ pub struct Slide {}
 pub struct Theme {
     pub name: SlideString,
     pub body: Vec<SlideStmt>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum TypeName {
+    Constructor(String, Vec<TypeName>),
+    Tuple(Vec<TypeName>),
+    Int,
+    String,
+}
+
+impl Display for TypeName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeName::Constructor(i, args) if args.len() == 0 => write!(f, "{i}"),
+            TypeName::Constructor(i, args) => {
+                write!(f, "{i}<{}>", args.iter().map(ToString::to_string).join(","))
+            },
+            TypeName::Tuple(t) if t.len() == 1 => write!(f, "({},)", t[0]),
+            TypeName::Tuple(t) => write!(f, "({})", t.into_iter().map(ToString::to_string).join(",")),
+            TypeName::Int => write!(f, "int"),
+            TypeName::String => write!(f, "string"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -82,7 +111,8 @@ pub enum Statement {
     },
     Let {
         name: String,
-        value: Expression,
+        ty: Option<TypeName>,
+        expr: Expression,
     },
     Title(SlideString),
 }
@@ -97,7 +127,7 @@ pub struct Program {
 pub struct Field {
     pub name: String,
     pub default: Option<Expression>,
-    pub field_type: String,
+    pub field_type: TypeName,
 }
 
 #[derive(Debug)]
@@ -109,5 +139,37 @@ pub enum TypeDef {
     Struct {
         name: String,
         fields: Vec<Field>,
+        generics: Vec<String>,
     },
+    Trait {
+        name: String,
+        items: Vec<ImplItem>,
+        generics: Vec<String>,
+        stubs: Vec<FunctionStub>,
+    },
+    Impl {
+        trait_name: Option<TypeName>,
+        name: TypeName,
+        instantiated_generics: Vec<String>,
+        body: Vec<ImplItem>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum ImplItem {
+    Function(Function)
+}
+
+impl ImplItem {
+    pub fn name(&self) -> &str {
+        match self {
+            ImplItem::Function(f) => f.name.as_ref().expect("all items in implement blocks must have a name"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionStub {
+    pub name: String,
+    pub signature: FunctionSignature,
 }

@@ -14,4 +14,6 @@ by_address = "1.0.4"
 thiserror = "1.0.37"
 convert_case = "0.6.0"
 itertools = "0.10.5"
+typed-arena = "2.0.1"
+derivative = "2.2.0"
 

@@ -1,7 +1,42 @@
+
+trait From<T> {
+    fn from(v: T) -> Self;
+}
+
+trait Into<T> {
+    fn into(self: Self) -> T;
+}
+
+// impl<T, U> Into<U> for T {
+//     fn into(self) -> U {
+//         From::from(self)
+//     }
+// }
+
 struct Color {
     r: int,
     g: int,
     b: int,
+}
+
+// impl From<(int, int, int)> for Color {
+//     fn from(a: (int, int, int)) {
+//         Color {
+//             r = a.0,
+//             g = a.1,
+//             b = a.2,
+//         }
+//     }
+// }
+
+impl Into<Color> for (int, int, int) {
+    fn into(self: Self) -> Color {
+        Color {
+            r = a.0,
+            g = a.1,
+            b = a.2,
+        }
+    }
 }
 
 struct Theme {
@@ -10,12 +45,12 @@ struct Theme {
 }
 
 theme example {
-    background = (255, 0, 0);
+    background = (255, 0, 0).into();
 }
 
 // this is the desugaring of theme example {}
 let example = Theme {
-    background = (255, 0, 0),
+    background = (255, 0, 0).into(),
 };
 
 fn test_function() {
